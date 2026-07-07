@@ -366,6 +366,7 @@ app.post('/api/paiement/initier', async (req, res) => {
         const response = await fetch(PAYTECH_API_URL, {
             method: 'POST',
             headers: {
+                'Accept': 'application/json',
                 'Content-Type': 'application/json',
                 'API_KEY': PAYTECH_API_KEY,
                 'API_SECRET': PAYTECH_API_SECRET
@@ -373,9 +374,25 @@ app.post('/api/paiement/initier', async (req, res) => {
             body: JSON.stringify(payload)
         });
 
-        const data = await response.json();
+        const responseText = await response.text();
+        let data;
 
-        if (data.success === 1 && data.redirect_url) {
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            console.error('Réponse PayTech non JSON :', {
+                status: response.status,
+                body: responseText
+            });
+            return res.status(502).json({
+                succes: false,
+                erreur: 'Réponse invalide reçue depuis PayTech.'
+            });
+        }
+
+        const paymentUrl = data.redirect_url || data.redirectUrl;
+
+        if (data.success === 1 && paymentUrl) {
             if (commande_id) {
                 await Commande.findOneAndUpdate(
                     { numero: commande_id },
@@ -385,14 +402,20 @@ app.post('/api/paiement/initier', async (req, res) => {
 
             return res.json({
                 succes: true,
-                payment_url: data.redirect_url,
+                payment_url: paymentUrl,
                 transaction_id
             });
         }
 
+        console.error('Erreur PayTech /payment/request-payment :', {
+            status: response.status,
+            payload,
+            response: data
+        });
+
         return res.status(400).json({
             succes: false,
-            erreur: data.error || data.message || 'Erreur PayTech.'
+            erreur: data.error || data.message || data.errors || `Erreur PayTech (HTTP ${response.status}).`
         });
     } catch (error) {
         console.error('Erreur POST /api/paiement/initier :', error);
