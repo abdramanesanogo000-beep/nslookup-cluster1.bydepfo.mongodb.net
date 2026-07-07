@@ -53,8 +53,26 @@ const commandeSchema = new mongoose.Schema({
     },
     statut: {
         type: String,
-        enum: ['En attente', 'Payé non livré', 'Payé livré', 'Annulée'],
+        enum: [
+            'En attente',
+            'En attente paiement',
+            'Confirmée',
+            'Paiement échoué',
+            'Payé non livré',
+            'Payé livré',
+            'En livraison',
+            'Livrée',
+            'Annulée'
+        ],
         default: 'En attente'
+    },
+    transaction_id: {
+        type: String,
+        default: ''
+    },
+    paiement_confirme: {
+        type: Boolean,
+        default: false
     },
     notes: {
         type: String,
