@@ -11,9 +11,10 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/hygia?retryWrite
 ADMIN_PASSWORD=ton_mot_de_passe_admin
 PORT=3000
 
-# CinetPay (paiement Orange Money / Wave / Carte bancaire)
-CINETPAY_API_KEY=ta_cle_api_cinetpay
-CINETPAY_SITE_ID=ton_site_id_cinetpay
+# PayTech (paiement Orange Money / Wave / Carte bancaire)
+PAYTECH_API_KEY=ta_cle_api_paytech
+PAYTECH_API_SECRET=ta_cle_secrete_paytech
+PAYTECH_ENV=prod
 
 # SendGrid (emails de bienvenue et récapitulatifs de commande)
 SENDGRID_API_KEY=ta_cle_api_sendgrid
@@ -23,7 +24,7 @@ FRONTEND_URL=https://abdramanesanogo000-beep.github.io/sitehygia.github.io
 BACKEND_URL=https://ton-url-render.onrender.com
 ```
 
-⚠️ Ne jamais committer les clés CinetPay et SendGrid dans le code. Elles doivent uniquement
+⚠️ Ne jamais committer les clés PayTech et SendGrid dans le code. Elles doivent uniquement
 exister dans les variables d'environnement de Render (ou dans un fichier `.env`
 local non versionné).
 
@@ -41,8 +42,8 @@ local non versionné).
 - `PATCH /api/auth/motdepasse` — Changer le mot de passe
 - `DELETE /api/auth/supprimer` — Supprimer un compte client (email + mot de passe requis)
 - `POST /api/commandes` — Créer une commande (appelé depuis le site)
-- `POST /api/paiement/initier` — Initier un paiement CinetPay (Orange Money, Wave, Carte)
-- `POST /api/paiement/notification` — Webhook CinetPay (confirmation automatique du paiement)
+- `POST /api/paiement/initier` — Initier un paiement PayTech (Orange Money, Wave, Carte)
+- `POST /api/paiement/notification` — Webhook PayTech (confirmation automatique du paiement)
 - `GET /api/paiement/verifier?transaction=XXX` — Vérifier le statut d'un paiement
 - `GET /api/admin/commandes` — Lister les commandes (admin)
 - `GET /api/admin/commandes/:numero` — Détails d'une commande (admin)
@@ -51,7 +52,7 @@ local non versionné).
 
 Toutes les routes admin nécessitent le header `x-admin-password`.
 
-Sur CinetPay, l'URL de notification (webhook) à configurer est :
+Sur PayTech, l'URL de notification (webhook) à configurer est :
 `BACKEND_URL/api/paiement/notification`
 
 ## Déploiement

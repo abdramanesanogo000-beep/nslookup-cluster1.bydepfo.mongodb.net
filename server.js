@@ -299,18 +299,41 @@ app.post('/api/commandes', async (req, res) => {
 });
 
 // ===========================================
-// PAIEMENT CINETPAY
+// PAIEMENT PAYTECH
 // ===========================================
 
-const CINETPAY_API_URL = 'https://api-checkout.cinetpay.com/v2/payment';
-const CINETPAY_CHECK_URL = 'https://api-checkout.cinetpay.com/v2/payment/check';
+const PAYTECH_API_URL = 'https://paytech.sn/api/payment/request-payment';
+const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY;
+const PAYTECH_API_SECRET = process.env.PAYTECH_API_SECRET;
+const PAYTECH_ENV = process.env.PAYTECH_ENV || 'prod';
 
 function genererTransactionId() {
     const random = Math.random().toString(36).substring(2, 7);
     return `HYG-${Date.now()}-${random}`;
 }
 
-// Initier un paiement CinetPay (Orange Money, Wave, Carte bancaire)
+function mapMethodePayTech(methode) {
+    switch (methode) {
+        case 'orange': return 'Orange Money';
+        case 'wave': return 'Wave';
+        case 'carte': return 'Carte Bancaire';
+        default: return '';
+    }
+}
+
+// Vérifier HMAC d'une notification PayTech
+function verifierHmacPayTech(body) {
+    if (!PAYTECH_API_KEY || !PAYTECH_API_SECRET) return false;
+
+    const crypto = require('crypto');
+    const item_price = body.item_price || body.final_item_price || 0;
+    const ref_command = body.ref_command || '';
+    const message = `${item_price}|${ref_command}|${PAYTECH_API_KEY}`;
+    const expected = crypto.createHmac('sha256', PAYTECH_API_SECRET).update(message).digest('hex');
+    return expected === body.hmac_compute;
+}
+
+// Initier un paiement PayTech (Orange Money, Wave, Carte bancaire)
 app.post('/api/paiement/initier', async (req, res) => {
     try {
         const { commande_id, montant, client, methode } = req.body;
@@ -319,39 +342,40 @@ app.post('/api/paiement/initier', async (req, res) => {
             return res.status(400).json({ succes: false, erreur: 'Données de paiement incomplètes.' });
         }
 
-        const transaction_id = genererTransactionId();
+        if (!PAYTECH_API_KEY || !PAYTECH_API_SECRET) {
+            return res.status(500).json({ succes: false, erreur: 'Clés PayTech non configurées.' });
+        }
 
-        const channels = methode === 'carte' ? 'CREDIT_CARD' : 'MOBILE_MONEY';
+        const transaction_id = genererTransactionId();
+        const targetPayment = mapMethodePayTech(methode);
 
         const payload = {
-            apikey: process.env.CINETPAY_API_KEY,
-            site_id: process.env.CINETPAY_SITE_ID,
-            transaction_id,
-            amount: Math.round(montant),
+            item_name: `Commande Hygia ${commande_id || transaction_id}`,
+            item_price: Math.round(montant),
             currency: 'XOF',
-            description: `Commande Hygia ${commande_id || ''}`.trim(),
-            return_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?transaction=${transaction_id}`,
-            notify_url: `${process.env.BACKEND_URL}/api/paiement/notification`,
-            customer_name: client.nom || '',
-            customer_email: client.email || 'client@hygia.com',
-            customer_phone_number: client.telephone || '',
-            customer_address: client.adresse || '',
-            customer_city: 'Bamako',
-            customer_country: 'ML',
-            channels,
-            lang: 'fr',
-            metadata: commande_id || ''
+            ref_command: transaction_id,
+            command_name: `Paiement commande Hygia ${commande_id || ''}`.trim(),
+            env: PAYTECH_ENV,
+            target_payment: targetPayment,
+            ipn_url: `${process.env.BACKEND_URL}/api/paiement/notification`,
+            success_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?transaction=${transaction_id}`,
+            cancel_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?transaction=${transaction_id}&statut=annule`,
+            custom_field: JSON.stringify({ commande_id: commande_id || '' })
         };
 
-        const response = await fetch(CINETPAY_API_URL, {
+        const response = await fetch(PAYTECH_API_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'API_KEY': PAYTECH_API_KEY,
+                'API_SECRET': PAYTECH_API_SECRET
+            },
             body: JSON.stringify(payload)
         });
 
         const data = await response.json();
 
-        if (data.code === '201') {
+        if (data.success === 1 && data.redirect_url) {
             if (commande_id) {
                 await Commande.findOneAndUpdate(
                     { numero: commande_id },
@@ -361,58 +385,56 @@ app.post('/api/paiement/initier', async (req, res) => {
 
             return res.json({
                 succes: true,
-                payment_url: data.data.payment_url,
+                payment_url: data.redirect_url,
                 transaction_id
             });
         }
 
-        return res.status(400).json({ succes: false, erreur: data.message || 'Erreur CinetPay.' });
+        return res.status(400).json({
+            succes: false,
+            erreur: data.error || data.message || 'Erreur PayTech.'
+        });
     } catch (error) {
         console.error('Erreur POST /api/paiement/initier :', error);
         return res.status(500).json({ erreur: 'Erreur serveur.' });
     }
 });
 
-// Webhook CinetPay — notification automatique après paiement
+// Webhook PayTech — notification automatique après paiement
 app.post('/api/paiement/notification', async (req, res) => {
     try {
-        const cpm_trans_id = req.body.cpm_trans_id;
+        const body = req.body;
+        const ref_command = body.ref_command;
 
-        if (!cpm_trans_id) {
+        if (!ref_command) {
             return res.status(200).send('OK');
         }
 
-        const response = await fetch(CINETPAY_CHECK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                apikey: process.env.CINETPAY_API_KEY,
-                site_id: process.env.CINETPAY_SITE_ID,
-                transaction_id: cpm_trans_id
-            })
-        });
+        // Vérifier la signature HMAC pour sécuriser la notification
+        if (!verifierHmacPayTech(body)) {
+            console.log('⚠️ HMAC PayTech invalide pour : ' + ref_command);
+            return res.status(200).send('OK');
+        }
 
-        const data = await response.json();
-
-        if (data.code === '00' && data.data && data.data.status === 'ACCEPTED') {
+        if (body.type_event === 'sale_complete') {
             const commande = await Commande.findOneAndUpdate(
-                { transaction_id: cpm_trans_id },
+                { transaction_id: ref_command },
                 { $set: { statut: 'Payé non livré', paiement_confirme: true } },
                 { new: true }
             );
-            console.log('✅ Paiement confirmé : ' + cpm_trans_id);
+            console.log('✅ Paiement confirmé PayTech : ' + ref_command);
 
             if (commande) {
                 envoyerEmailRecapCommande(commande).catch(err => {
                     console.error('Erreur email récap commande :', err);
                 });
             }
-        } else {
+        } else if (body.type_event === 'sale_canceled') {
             await Commande.findOneAndUpdate(
-                { transaction_id: cpm_trans_id },
+                { transaction_id: ref_command },
                 { $set: { statut: 'Paiement échoué' } }
             );
-            console.log('❌ Paiement échoué : ' + cpm_trans_id);
+            console.log('❌ Paiement annulé PayTech : ' + ref_command);
         }
 
         return res.status(200).send('OK');
@@ -431,31 +453,21 @@ app.get('/api/paiement/verifier', async (req, res) => {
             return res.status(400).json({ statut: 'FAILED', erreur: 'Transaction manquante.' });
         }
 
-        const response = await fetch(CINETPAY_CHECK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                apikey: process.env.CINETPAY_API_KEY,
-                site_id: process.env.CINETPAY_SITE_ID,
-                transaction_id
-            })
-        });
+        const commande = await Commande.findOne({ transaction_id });
 
-        const data = await response.json();
-
-        if (data.code === '00') {
-            const commande = await Commande.findOne({ transaction_id });
-
-            return res.json({
-                statut: data.data.status,
-                numero: commande?.numero || '',
-                total: commande?.total || 0,
-                methode: commande?.modePaiement || '',
-                nom: commande?.client?.nom || ''
-            });
+        if (!commande) {
+            return res.json({ statut: 'FAILED' });
         }
 
-        return res.json({ statut: 'FAILED' });
+        const paye = commande.paiement_confirme === true;
+
+        return res.json({
+            statut: paye ? 'ACCEPTED' : 'PENDING',
+            numero: commande.numero || '',
+            total: commande.total || 0,
+            methode: commande.modePaiement || '',
+            nom: commande.client?.nom || ''
+        });
     } catch (error) {
         console.error('Erreur GET /api/paiement/verifier :', error);
         return res.status(500).json({ statut: 'FAILED', erreur: 'Erreur serveur.' });
