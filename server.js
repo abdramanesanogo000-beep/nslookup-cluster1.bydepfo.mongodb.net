@@ -307,15 +307,6 @@ const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY;
 const PAYTECH_SECRET_KEY = process.env.PAYTECH_SECRET_KEY;
 const PAYTECH_ENV = process.env.PAYTECH_ENV || 'test';
 
-function mapMethodePayTech(methode) {
-    switch (methode) {
-        case 'orange': return 'Orange Money';
-        case 'wave': return 'Wave';
-        case 'carte': return 'Carte Bancaire';
-        default: return '';
-    }
-}
-
 // Initier un paiement PayTech (Orange Money, Wave, Carte bancaire)
 app.post('/api/paiement/initier', async (req, res) => {
     try {
@@ -329,8 +320,6 @@ app.post('/api/paiement/initier', async (req, res) => {
             return res.status(500).json({ succes: false, erreur: 'Clés PayTech non configurées.' });
         }
 
-        const targetPayment = mapMethodePayTech(methode);
-
         const payload = {
             item_name: `Commande Hygia ${commande_id}`,
             item_price: Math.round(montant),
@@ -338,7 +327,6 @@ app.post('/api/paiement/initier', async (req, res) => {
             ref_command: commande_id,
             command_name: `Matériel médical Hygia — ${commande_id}`,
             env: PAYTECH_ENV,
-            target_payment: targetPayment,
             ipn_url: `${process.env.BACKEND_URL}/api/paiement/notification`,
             success_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?ref=${commande_id}`,
             cancel_url: `${process.env.FRONTEND_URL}/panier.html?annule=1`,
