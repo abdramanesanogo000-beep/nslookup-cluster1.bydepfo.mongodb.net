@@ -58,8 +58,6 @@ const commandeSchema = new mongoose.Schema({
             'En attente paiement',
             'Confirmée',
             'Paiement échoué',
-            'Payé non livré',
-            'Payé livré',
             'En livraison',
             'Livrée',
             'Annulée'
@@ -67,6 +65,10 @@ const commandeSchema = new mongoose.Schema({
         default: 'En attente'
     },
     transaction_id: {
+        type: String,
+        default: ''
+    },
+    paytech_token: {
         type: String,
         default: ''
     },

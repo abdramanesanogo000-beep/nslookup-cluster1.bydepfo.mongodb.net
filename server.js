@@ -304,13 +304,8 @@ app.post('/api/commandes', async (req, res) => {
 
 const PAYTECH_API_URL = 'https://paytech.sn/api/payment/request-payment';
 const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY;
-const PAYTECH_API_SECRET = process.env.PAYTECH_API_SECRET;
-const PAYTECH_ENV = process.env.PAYTECH_ENV || 'prod';
-
-function genererTransactionId() {
-    const random = Math.random().toString(36).substring(2, 7);
-    return `HYG-${Date.now()}-${random}`;
-}
+const PAYTECH_SECRET_KEY = process.env.PAYTECH_SECRET_KEY;
+const PAYTECH_ENV = process.env.PAYTECH_ENV || 'test';
 
 function mapMethodePayTech(methode) {
     switch (methode) {
@@ -321,46 +316,38 @@ function mapMethodePayTech(methode) {
     }
 }
 
-// Vérifier HMAC d'une notification PayTech
-function verifierHmacPayTech(body) {
-    if (!PAYTECH_API_KEY || !PAYTECH_API_SECRET) return false;
-
-    const crypto = require('crypto');
-    const item_price = body.item_price || body.final_item_price || 0;
-    const ref_command = body.ref_command || '';
-    const message = `${item_price}|${ref_command}|${PAYTECH_API_KEY}`;
-    const expected = crypto.createHmac('sha256', PAYTECH_API_SECRET).update(message).digest('hex');
-    return expected === body.hmac_compute;
-}
-
 // Initier un paiement PayTech (Orange Money, Wave, Carte bancaire)
 app.post('/api/paiement/initier', async (req, res) => {
     try {
         const { commande_id, montant, client, methode } = req.body;
 
-        if (!montant || !client || !methode) {
+        if (!commande_id || !montant || !client || !methode) {
             return res.status(400).json({ succes: false, erreur: 'Données de paiement incomplètes.' });
         }
 
-        if (!PAYTECH_API_KEY || !PAYTECH_API_SECRET) {
+        if (!PAYTECH_API_KEY || !PAYTECH_SECRET_KEY) {
             return res.status(500).json({ succes: false, erreur: 'Clés PayTech non configurées.' });
         }
 
-        const transaction_id = genererTransactionId();
         const targetPayment = mapMethodePayTech(methode);
 
         const payload = {
-            item_name: `Commande Hygia ${commande_id || transaction_id}`,
+            item_name: `Commande Hygia ${commande_id}`,
             item_price: Math.round(montant),
             currency: 'XOF',
-            ref_command: transaction_id,
-            command_name: `Paiement commande Hygia ${commande_id || ''}`.trim(),
+            ref_command: commande_id,
+            command_name: `Matériel médical Hygia — ${commande_id}`,
             env: PAYTECH_ENV,
             target_payment: targetPayment,
             ipn_url: `${process.env.BACKEND_URL}/api/paiement/notification`,
-            success_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?transaction=${transaction_id}`,
-            cancel_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?transaction=${transaction_id}&statut=annule`,
-            custom_field: JSON.stringify({ commande_id: commande_id || '' })
+            success_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?ref=${commande_id}`,
+            cancel_url: `${process.env.FRONTEND_URL}/panier.html?annule=1`,
+            custom_field: JSON.stringify({
+                client_nom: client.nom,
+                client_tel: client.telephone,
+                client_email: client.email,
+                methode
+            })
         };
 
         const response = await fetch(PAYTECH_API_URL, {
@@ -369,131 +356,115 @@ app.post('/api/paiement/initier', async (req, res) => {
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
                 'API_KEY': PAYTECH_API_KEY,
-                'API_SECRET': PAYTECH_API_SECRET
+                'API_SECRET': PAYTECH_SECRET_KEY
             },
             body: JSON.stringify(payload)
         });
 
-        const responseText = await response.text();
-        let data;
+        const data = await response.json();
 
-        try {
-            data = JSON.parse(responseText);
-        } catch (parseError) {
-            console.error('Réponse PayTech non JSON :', {
-                status: response.status,
-                body: responseText
-            });
-            return res.status(502).json({
-                succes: false,
-                erreur: 'Réponse invalide reçue depuis PayTech.'
-            });
-        }
-
-        const paymentUrl = data.redirect_url || data.redirectUrl;
-
-        if (data.success === 1 && paymentUrl) {
-            if (commande_id) {
-                await Commande.findOneAndUpdate(
-                    { numero: commande_id },
-                    { $set: { transaction_id, statut: 'En attente paiement' } }
-                );
-            }
+        if (data.success === 1 && data.redirect_url) {
+            await Commande.findOneAndUpdate(
+                { numero: commande_id },
+                {
+                    $set: {
+                        paytech_token: data.token || '',
+                        statut: 'En attente paiement',
+                        paiement_confirme: false
+                    }
+                }
+            );
 
             return res.json({
                 succes: true,
-                payment_url: paymentUrl,
-                transaction_id
+                redirect_url: data.redirect_url,
+                token: data.token
             });
         }
 
-        console.error('Erreur PayTech /payment/request-payment :', {
-            status: response.status,
-            payload,
-            response: data
-        });
-
-        return res.status(400).json({
-            succes: false,
-            erreur: data.error || data.message || data.errors || `Erreur PayTech (HTTP ${response.status}).`
-        });
+        console.error('Erreur PayTech /payment/request-payment :', data);
+        return res.status(400).json({ succes: false, erreur: 'Erreur initialisation paiement' });
     } catch (error) {
         console.error('Erreur POST /api/paiement/initier :', error);
-        return res.status(500).json({ erreur: 'Erreur serveur.' });
+        return res.status(500).json({ erreur: 'Erreur serveur' });
     }
 });
 
 // Webhook PayTech — notification automatique après paiement
 app.post('/api/paiement/notification', async (req, res) => {
     try {
-        const body = req.body;
-        const ref_command = body.ref_command;
+        const { type_event, ref_command, token } = req.body;
 
         if (!ref_command) {
-            return res.status(200).send('OK');
+            return res.status(200).json({ status: 'ok' });
         }
 
-        // Vérifier la signature HMAC pour sécuriser la notification
-        if (!verifierHmacPayTech(body)) {
-            console.log('⚠️ HMAC PayTech invalide pour : ' + ref_command);
-            return res.status(200).send('OK');
+        const commande = await Commande.findOne({ numero: ref_command });
+
+        if (!commande) {
+            console.log('⚠️ IPN PayTech : commande introuvable pour ' + ref_command);
+            return res.status(200).json({ status: 'ok' });
         }
 
-        if (body.type_event === 'sale_complete') {
-            const commande = await Commande.findOneAndUpdate(
-                { transaction_id: ref_command },
-                { $set: { statut: 'Payé non livré', paiement_confirme: true } },
+        if (commande.paytech_token && token && commande.paytech_token !== token) {
+            console.log('⚠️ IPN PayTech : token invalide pour ' + ref_command);
+            return res.status(200).json({ status: 'ok' });
+        }
+
+        if (type_event === 'sale_complete') {
+            const commandeConfirmee = await Commande.findOneAndUpdate(
+                { numero: ref_command },
+                { $set: { statut: 'Confirmée', paiement_confirme: true } },
                 { new: true }
             );
-            console.log('✅ Paiement confirmé PayTech : ' + ref_command);
+            console.log('✅ Paiement PayTech confirmé : ' + ref_command);
 
-            if (commande) {
-                envoyerEmailRecapCommande(commande).catch(err => {
+            if (commandeConfirmee) {
+                envoyerEmailRecapCommande(commandeConfirmee).catch(err => {
                     console.error('Erreur email récap commande :', err);
                 });
             }
-        } else if (body.type_event === 'sale_canceled') {
+        } else {
             await Commande.findOneAndUpdate(
-                { transaction_id: ref_command },
-                { $set: { statut: 'Paiement échoué' } }
+                { numero: ref_command },
+                { $set: { statut: 'Paiement échoué', paiement_confirme: false } }
             );
-            console.log('❌ Paiement annulé PayTech : ' + ref_command);
+            console.log('❌ Paiement PayTech échoué : ' + ref_command);
         }
 
-        return res.status(200).send('OK');
+        return res.status(200).json({ status: 'ok' });
     } catch (error) {
         console.error('Erreur POST /api/paiement/notification :', error);
-        return res.status(200).send('OK');
+        return res.status(200).json({ status: 'ok' });
     }
 });
 
 // Vérifier le statut d'un paiement (appelé depuis commande-confirmee.html)
-app.get('/api/paiement/verifier', async (req, res) => {
+app.get('/api/paiement/statut', async (req, res) => {
     try {
-        const transaction_id = req.query.transaction;
+        const ref = req.query.ref;
 
-        if (!transaction_id) {
-            return res.status(400).json({ statut: 'FAILED', erreur: 'Transaction manquante.' });
+        if (!ref) {
+            return res.status(400).json({ erreur: 'Référence manquante.' });
         }
 
-        const commande = await Commande.findOne({ transaction_id });
+        const commande = await Commande.findOne({ numero: ref });
 
         if (!commande) {
-            return res.json({ statut: 'FAILED' });
+            return res.status(404).json({ erreur: 'Commande introuvable' });
         }
 
-        const paye = commande.paiement_confirme === true;
-
         return res.json({
-            statut: paye ? 'ACCEPTED' : 'PENDING',
-            numero: commande.numero || '',
-            total: commande.total || 0,
-            methode: commande.modePaiement || '',
+            statut: commande.statut,
+            paiement_confirme: commande.paiement_confirme,
+            numero: commande.numero,
+            total: commande.total,
+            modePaiement: commande.modePaiement,
             nom: commande.client?.nom || ''
         });
     } catch (error) {
-        console.error('Erreur GET /api/paiement/verifier :', error);
-        return res.status(500).json({ statut: 'FAILED', erreur: 'Erreur serveur.' });
+        console.error('Erreur GET /api/paiement/statut :', error);
+        return res.status(500).json({ erreur: 'Erreur serveur.' });
     }
 });
 

@@ -13,7 +13,7 @@ PORT=3000
 
 # PayTech (paiement Orange Money / Wave / Carte bancaire)
 PAYTECH_API_KEY=ta_cle_api_paytech
-PAYTECH_API_SECRET=ta_cle_secrete_paytech
+PAYTECH_SECRET_KEY=ta_cle_secrete_paytech
 PAYTECH_ENV=prod
 
 # SendGrid (emails de bienvenue et récapitulatifs de commande)
