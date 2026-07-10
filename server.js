@@ -15,7 +15,9 @@ require('dotenv').config();
 
 const Commande = require('./models/Commande');
 const Utilisateur = require('./models/Utilisateur');
-const { envoyerEmailBienvenue, envoyerEmailRecapCommande } = require('./services/email');
+const Partenaire = require('./models/Partenaire');
+const crypto = require('crypto');
+const { envoyerEmailBienvenue, envoyerEmailRecapCommande, envoyerEmailReinitialisationMotDePasse } = require('./services/email');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +31,21 @@ app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} — ${req.method} ${req.path}`);
     next();
 });
+
+// ===========================================
+// PARTENAIRES & CODES PROMO
+// ===========================================
+
+const REDUCTION_CLIENT_PARTENAIRE = 5; // % de réduction client sur code partenaire
+
+// Calcule la commission d'un partenaire selon les paliers de chiffre d'affaires généré
+function calculerCommission(totalFCFA) {
+    let taux;
+    if (totalFCFA >= 1000000) taux = 10;
+    else if (totalFCFA >= 500000) taux = 5;
+    else taux = 3;
+    return { taux, montant: Math.round(totalFCFA * taux / 100) };
+}
 
 // Vérification mot de passe admin
 function verifierAdmin(req, res, next) {
@@ -116,6 +133,69 @@ app.post('/api/auth/connexion', async (req, res) => {
         });
     } catch (error) {
         console.error('Erreur POST /api/auth/connexion :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Mot de passe oublié — envoyer lien de réinitialisation
+app.post('/api/auth/mot-de-passe-oublie', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ succes: false, erreur: 'Email obligatoire.' });
+
+        const utilisateur = await Utilisateur.findOne({ email: email.toLowerCase().trim() });
+
+        // Toujours répondre OK pour ne pas révéler si l'email existe
+        if (!utilisateur) {
+            return res.json({ succes: true, message: 'Si cet email est enregistré, un lien vous a été envoyé.' });
+        }
+
+        const token = crypto.randomBytes(32).toString('hex');
+        utilisateur.resetToken = token;
+        utilisateur.resetTokenExpire = new Date(Date.now() + 60 * 60 * 1000); // 1 heure
+        await utilisateur.save();
+
+        envoyerEmailReinitialisationMotDePasse(utilisateur.email, utilisateur.nom, token).catch(err => {
+            console.error('Erreur email reset mot de passe :', err);
+        });
+
+        return res.json({ succes: true, message: 'Si cet email est enregistré, un lien vous a été envoyé.' });
+    } catch (error) {
+        console.error('Erreur /api/auth/mot-de-passe-oublie :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Réinitialiser le mot de passe avec le token
+app.post('/api/auth/reinitialiser-mot-de-passe', async (req, res) => {
+    try {
+        const { token, nouveauMotDePasse } = req.body;
+
+        if (!token || !nouveauMotDePasse) {
+            return res.status(400).json({ succes: false, erreur: 'Token et nouveau mot de passe obligatoires.' });
+        }
+
+        if (nouveauMotDePasse.length < 6) {
+            return res.status(400).json({ succes: false, erreur: 'Le mot de passe doit contenir au moins 6 caractères.' });
+        }
+
+        const utilisateur = await Utilisateur.findOne({
+            resetToken: token,
+            resetTokenExpire: { $gt: new Date() }
+        });
+
+        if (!utilisateur) {
+            return res.status(400).json({ succes: false, erreur: 'Lien invalide ou expiré. Veuillez refaire une demande.' });
+        }
+
+        utilisateur.motdepasse = nouveauMotDePasse;
+        utilisateur.resetToken = null;
+        utilisateur.resetTokenExpire = null;
+        await utilisateur.save();
+
+        return res.json({ succes: true, message: 'Mot de passe réinitialisé avec succès.' });
+    } catch (error) {
+        console.error('Erreur /api/auth/reinitialiser-mot-de-passe :', error);
         return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
     }
 });
@@ -260,10 +340,32 @@ app.patch('/api/auth/motdepasse', async (req, res) => {
     }
 });
 
+// Vérifier un code promo partenaire (public, utilisé au panier)
+app.post('/api/verifier-code-promo', async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) return res.json({ valide: false });
+
+        const partenaire = await Partenaire.findOne({
+            codePromo: code.toUpperCase().trim(),
+            actif: true
+        });
+
+        if (!partenaire) {
+            return res.json({ valide: false });
+        }
+
+        return res.json({ valide: true, reduction: REDUCTION_CLIENT_PARTENAIRE });
+    } catch (error) {
+        console.error('Erreur /api/verifier-code-promo :', error);
+        return res.status(500).json({ valide: false, erreur: 'Erreur serveur.' });
+    }
+});
+
 // Créer une commande (appelé depuis yames.js)
 app.post('/api/commandes', async (req, res) => {
     try {
-        const { client, articles, total, modePaiement } = req.body;
+        const { client, articles, total, sousTotal, codePromoPartenaire, modePaiement } = req.body;
 
         if (!client || !client.nom || !client.telephone || !client.adresse) {
             return res.status(400).json({ erreur: 'Informations de livraison incomplètes.' });
@@ -271,6 +373,25 @@ app.post('/api/commandes', async (req, res) => {
 
         if (!Array.isArray(articles) || articles.length === 0) {
             return res.status(400).json({ erreur: 'La commande doit contenir au moins un article.' });
+        }
+
+        let totalFinal = total;
+        let reductionPartenaire = 0;
+        let codePartenaireValide = '';
+
+        // Si un code partenaire est fourni, on revalide et on recalcule la réduction côté serveur
+        if (codePromoPartenaire) {
+            const partenaire = await Partenaire.findOne({
+                codePromo: codePromoPartenaire.toUpperCase().trim(),
+                actif: true
+            });
+
+            if (partenaire) {
+                const base = typeof sousTotal === 'number' ? sousTotal : total;
+                reductionPartenaire = Math.floor(base * REDUCTION_CLIENT_PARTENAIRE / 100);
+                totalFinal = Math.max(0, base - reductionPartenaire);
+                codePartenaireValide = partenaire.codePromo;
+            }
         }
 
         const commande = new Commande({
@@ -281,8 +402,10 @@ app.post('/api/commandes', async (req, res) => {
                 email: client.email || ''
             },
             articles,
-            total,
-            modePaiement
+            total: totalFinal,
+            modePaiement,
+            codePromoPartenaire: codePartenaireValide,
+            reductionPartenaire
         });
 
         await commande.save();
@@ -299,6 +422,188 @@ app.post('/api/commandes', async (req, res) => {
     } catch (error) {
         console.error('Erreur POST /api/commandes :', error);
         return res.status(500).json({ erreur: 'Erreur serveur.' });
+    }
+});
+
+// Commandes d'un client (par email)
+app.get('/api/mes-commandes', async (req, res) => {
+    try {
+        const email = req.query.email;
+        if (!email) return res.status(400).json({ succes: false, erreur: 'Email obligatoire.' });
+
+        const commandes = await Commande.find({ 'client.email': email.toLowerCase().trim() })
+            .sort({ date: -1 })
+            .select('numero date articles total modePaiement statut client');
+
+        return res.json({ succes: true, commandes });
+    } catch (error) {
+        console.error('Erreur GET /api/mes-commandes :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// ===========================================
+// ADMIN — GESTION DES PARTENAIRES
+// ===========================================
+
+// Créer un partenaire
+app.post('/api/admin/partenaires', verifierAdmin, async (req, res) => {
+    try {
+        const { nom, email, telephone, codePromo } = req.body;
+
+        if (!nom || !codePromo) {
+            return res.status(400).json({ succes: false, erreur: 'Nom et code promo obligatoires.' });
+        }
+
+        const codeNormalise = codePromo.toUpperCase().trim();
+        const existe = await Partenaire.findOne({ codePromo: codeNormalise });
+        if (existe) {
+            return res.status(400).json({ succes: false, erreur: 'Ce code promo est déjà utilisé.' });
+        }
+
+        const partenaire = new Partenaire({
+            nom: nom.trim(),
+            email: (email || '').trim(),
+            telephone: (telephone || '').trim(),
+            codePromo: codeNormalise
+        });
+
+        await partenaire.save();
+        return res.status(201).json({ succes: true, partenaire });
+    } catch (error) {
+        console.error('Erreur POST /api/admin/partenaires :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Lister tous les partenaires avec leurs statistiques
+app.get('/api/admin/partenaires', verifierAdmin, async (req, res) => {
+    try {
+        const partenaires = await Partenaire.find().sort({ dateCreation: -1 });
+
+        const resultats = await Promise.all(partenaires.map(async (p) => {
+            const commandes = await Commande.find({
+                codePromoPartenaire: p.codePromo,
+                statut: { $ne: 'Annulée' }
+            });
+
+            const nbCommandes = commandes.length;
+            const totalFCFA = commandes.reduce((sum, c) => sum + c.total, 0);
+            const commission = calculerCommission(totalFCFA);
+
+            return {
+                _id: p._id,
+                nom: p.nom,
+                email: p.email,
+                telephone: p.telephone,
+                codePromo: p.codePromo,
+                actif: p.actif,
+                dateCreation: p.dateCreation,
+                nbCommandes,
+                totalFCFA,
+                commission
+            };
+        }));
+
+        return res.json(resultats);
+    } catch (error) {
+        console.error('Erreur GET /api/admin/partenaires :', error);
+        return res.status(500).json({ erreur: 'Erreur serveur.' });
+    }
+});
+
+// Détail d'un partenaire avec évolution mensuelle (pour graphique)
+app.get('/api/admin/partenaires/:id', verifierAdmin, async (req, res) => {
+    try {
+        const partenaire = await Partenaire.findById(req.params.id);
+        if (!partenaire) {
+            return res.status(404).json({ succes: false, erreur: 'Partenaire introuvable.' });
+        }
+
+        const commandes = await Commande.find({
+            codePromoPartenaire: partenaire.codePromo,
+            statut: { $ne: 'Annulée' }
+        }).sort({ date: 1 });
+
+        const nbCommandes = commandes.length;
+        const totalFCFA = commandes.reduce((sum, c) => sum + c.total, 0);
+        const commission = calculerCommission(totalFCFA);
+
+        // Évolution mensuelle (12 derniers mois)
+        const moisLabels = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+        const evolutionMap = {};
+
+        commandes.forEach(c => {
+            const d = new Date(c.date);
+            const cle = `${d.getFullYear()}-${d.getMonth()}`;
+            if (!evolutionMap[cle]) {
+                evolutionMap[cle] = { mois: `${moisLabels[d.getMonth()]} ${d.getFullYear()}`, total: 0, nb: 0, ordre: d.getFullYear() * 12 + d.getMonth() };
+            }
+            evolutionMap[cle].total += c.total;
+            evolutionMap[cle].nb += 1;
+        });
+
+        const evolutionMensuelle = Object.values(evolutionMap)
+            .sort((a, b) => a.ordre - b.ordre)
+            .slice(-12)
+            .map(e => ({ mois: e.mois, total: e.total, nb: e.nb }));
+
+        return res.json({
+            succes: true,
+            partenaire: {
+                _id: partenaire._id,
+                nom: partenaire.nom,
+                email: partenaire.email,
+                telephone: partenaire.telephone,
+                codePromo: partenaire.codePromo,
+                actif: partenaire.actif,
+                dateCreation: partenaire.dateCreation,
+                nbCommandes,
+                totalFCFA,
+                commission,
+                evolutionMensuelle
+            }
+        });
+    } catch (error) {
+        console.error('Erreur GET /api/admin/partenaires/:id :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Modifier un partenaire (infos ou statut actif/inactif)
+app.patch('/api/admin/partenaires/:id', verifierAdmin, async (req, res) => {
+    try {
+        const { nom, email, telephone, actif } = req.body;
+        const partenaire = await Partenaire.findById(req.params.id);
+
+        if (!partenaire) {
+            return res.status(404).json({ succes: false, erreur: 'Partenaire introuvable.' });
+        }
+
+        if (nom !== undefined) partenaire.nom = nom.trim();
+        if (email !== undefined) partenaire.email = email.trim();
+        if (telephone !== undefined) partenaire.telephone = telephone.trim();
+        if (actif !== undefined) partenaire.actif = actif;
+
+        await partenaire.save();
+        return res.json({ succes: true, partenaire });
+    } catch (error) {
+        console.error('Erreur PATCH /api/admin/partenaires/:id :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Supprimer un partenaire
+app.delete('/api/admin/partenaires/:id', verifierAdmin, async (req, res) => {
+    try {
+        const partenaire = await Partenaire.findByIdAndDelete(req.params.id);
+        if (!partenaire) {
+            return res.status(404).json({ succes: false, erreur: 'Partenaire introuvable.' });
+        }
+        return res.json({ succes: true, message: 'Partenaire supprimé.' });
+    } catch (error) {
+        console.error('Erreur DELETE /api/admin/partenaires/:id :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
     }
 });
 

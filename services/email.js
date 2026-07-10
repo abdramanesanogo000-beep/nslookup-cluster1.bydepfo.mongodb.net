@@ -234,8 +234,69 @@ L'équipe Hygia`;
     return envoyerEmail({ to: email, subject: sujet, text: texte, html });
 }
 
+async function envoyerEmailReinitialisationMotDePasse(email, nom, token) {
+    const lien = `${FRONTEND_URL}/reinitialiser-mot-de-passe.html?token=${token}`;
+
+    const sujet = 'Réinitialisation de votre mot de passe — Hygia';
+
+    const texte = `Bonjour ${nom},
+
+Vous avez demandé à réinitialiser votre mot de passe Hygia.
+
+Cliquez sur ce lien pour choisir un nouveau mot de passe :
+${lien}
+
+Ce lien est valable 1 heure. Passé ce délai, vous devrez refaire une demande.
+
+Si vous n'avez pas fait cette demande, ignorez cet email.
+
+L'équipe Hygia`;
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Réinitialisation mot de passe</title></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:'Segoe UI',Arial,sans-serif;">
+<div style="max-width:560px;margin:30px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+
+  <div style="background:linear-gradient(135deg,#185FA5,#0e3d6e);padding:30px 28px;text-align:center;">
+    <div style="font-size:30px;font-weight:900;color:#fff;letter-spacing:2px;">HYGIA</div>
+    <div style="color:#a8d0f7;font-size:12px;margin-top:4px;">MATÉRIEL MÉDICAL PROFESSIONNEL — BAMAKO</div>
+  </div>
+
+  <div style="padding:32px 28px;">
+    <div style="text-align:center;margin-bottom:24px;">
+      <div style="font-size:44px;">🔐</div>
+      <h2 style="color:#185FA5;margin:10px 0 4px;font-size:20px;">Réinitialisation du mot de passe</h2>
+    </div>
+
+    <p style="font-size:14px;color:#333;margin:0 0 16px;">Bonjour <strong>${nom}</strong>,</p>
+    <p style="font-size:14px;color:#555;margin:0 0 28px;">Vous avez demandé à réinitialiser votre mot de passe. Cliquez sur le bouton ci-dessous pour en choisir un nouveau.</p>
+
+    <div style="text-align:center;margin-bottom:28px;">
+      <a href="${lien}" style="display:inline-block;background:#185FA5;color:#fff;padding:14px 36px;text-decoration:none;border-radius:8px;font-size:15px;font-weight:700;">Réinitialiser mon mot de passe →</a>
+    </div>
+
+    <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:14px 16px;margin-bottom:20px;">
+      <p style="margin:0;font-size:12px;color:#856404;">⏱ Ce lien est valable <strong>1 heure</strong> seulement. Passé ce délai, vous devrez refaire une demande.</p>
+    </div>
+
+    <p style="font-size:12px;color:#aaa;margin:0;text-align:center;">Si vous n'avez pas demandé cette réinitialisation, ignorez simplement cet email.</p>
+  </div>
+
+  <div style="background:#f0f4f8;padding:18px 28px;text-align:center;border-top:1px solid #e8eef5;">
+    <p style="margin:0;font-size:11px;color:#888;">© ${new Date().getFullYear()} Hygia — Matériel médical professionnel à Bamako, Mali</p>
+  </div>
+
+</div>
+</body>
+</html>`;
+
+    return envoyerEmail({ to: email, subject: sujet, text: texte, html });
+}
+
 module.exports = {
     envoyerEmailBienvenue,
     envoyerEmailRecapCommande,
+    envoyerEmailReinitialisationMotDePasse,
     emailActif
 };

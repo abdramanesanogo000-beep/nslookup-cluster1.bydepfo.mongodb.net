@@ -27,6 +27,14 @@ const utilisateurSchema = new mongoose.Schema({
     dateInscription: {
         type: Date,
         default: Date.now
+    },
+    resetToken: {
+        type: String,
+        default: null
+    },
+    resetTokenExpire: {
+        type: Date,
+        default: null
     }
 });
 

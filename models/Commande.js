@@ -80,6 +80,16 @@ const commandeSchema = new mongoose.Schema({
         type: String,
         default: '',
         trim: true
+    },
+    codePromoPartenaire: {
+        type: String,
+        default: '',
+        trim: true,
+        uppercase: true
+    },
+    reductionPartenaire: {
+        type: Number,
+        default: 0
     }
 });
 
