@@ -58,6 +58,8 @@ const commandeSchema = new mongoose.Schema({
             'En attente paiement',
             'Confirmée',
             'Paiement échoué',
+            'Payé non livré',
+            'Payé livré',
             'En livraison',
             'Livrée',
             'Annulée'
