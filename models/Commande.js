@@ -26,6 +26,11 @@ const commandeSchema = new mongoose.Schema({
             required: true,
             trim: true
         },
+        commune: {
+            type: String,
+            default: '',
+            trim: true
+        },
         email: {
             type: String,
             default: '',
@@ -44,6 +49,11 @@ const commandeSchema = new mongoose.Schema({
     total: {
         type: Number,
         required: true,
+        min: 0
+    },
+    fraisLivraison: {
+        type: Number,
+        default: 0,
         min: 0
     },
     modePaiement: {

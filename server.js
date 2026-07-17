@@ -365,9 +365,9 @@ app.post('/api/verifier-code-promo', async (req, res) => {
 // Créer une commande (appelé depuis yames.js)
 app.post('/api/commandes', async (req, res) => {
     try {
-        const { client, articles, total, sousTotal, codePromoPartenaire, modePaiement } = req.body;
+        const { client, articles, total, sousTotal, shipping, codePromoPartenaire, modePaiement } = req.body;
 
-        if (!client || !client.nom || !client.telephone || !client.adresse) {
+        if (!client || !client.nom || !client.telephone || !client.adresse || !client.commune) {
             return res.status(400).json({ erreur: 'Informations de livraison incomplètes.' });
         }
 
@@ -375,6 +375,7 @@ app.post('/api/commandes', async (req, res) => {
             return res.status(400).json({ erreur: 'La commande doit contenir au moins un article.' });
         }
 
+        const fraisLivraison = Number(shipping) || 0;
         let totalFinal = total;
         let reductionPartenaire = 0;
         let codePartenaireValide = '';
@@ -389,7 +390,7 @@ app.post('/api/commandes', async (req, res) => {
             if (partenaire) {
                 const base = typeof sousTotal === 'number' ? sousTotal : total;
                 reductionPartenaire = Math.floor(base * REDUCTION_CLIENT_PARTENAIRE / 100);
-                totalFinal = Math.max(0, base - reductionPartenaire);
+                totalFinal = Math.max(0, base - reductionPartenaire) + fraisLivraison;
                 codePartenaireValide = partenaire.codePromo;
             }
         }
@@ -399,10 +400,12 @@ app.post('/api/commandes', async (req, res) => {
                 nom: client.nom,
                 telephone: client.telephone,
                 adresse: client.adresse,
+                commune: client.commune || '',
                 email: client.email || ''
             },
             articles,
             total: totalFinal,
+            fraisLivraison,
             modePaiement,
             codePromoPartenaire: codePartenaireValide,
             reductionPartenaire
