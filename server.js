@@ -27,6 +27,33 @@ const { signAdminToken, verifierAdmin, verifierMotDePasseAdmin } = require('./mi
 const { globalLimiter, authLimiter } = require('./middleware/rateLimit');
 
 const app = express();
+
+// Nettoyage global des entrées : protection NoSQL + XSS basique
+function sanitizeInput(req, res, next) {
+    function clean(value) {
+        if (typeof value === 'string') {
+            return value.replace(/[<>]/g, '').trim();
+        }
+        if (Array.isArray(value)) {
+            return value.map(clean);
+        }
+        if (value && typeof value === 'object' && !(value instanceof Date)) {
+            const cleanObj = {};
+            for (const [key, val] of Object.entries(value)) {
+                // Protège contre les injections NoSQL via clés contenant $ ou .
+                if (key.startsWith('$') || key.includes('.')) continue;
+                const safeKey = key.replace(/[<>]/g, '');
+                cleanObj[safeKey] = clean(val);
+            }
+            return cleanObj;
+        }
+        return value;
+    }
+    req.body = clean(req.body);
+    req.query = clean(req.query);
+    req.params = clean(req.params);
+    next();
+}
 const PORT = process.env.PORT || 3000;
 
 // Vérifications critiques de configuration
@@ -56,8 +83,9 @@ app.use(cors({
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json());
+app.use(sanitizeInput);
 app.use(globalLimiter);
 
 // Middleware de log simple
@@ -453,14 +481,10 @@ app.post('/api/commandes', async (req, res) => {
             return res.status(400).json({ erreur: 'La commande doit contenir au moins un article.' });
         }
 
-        // Récupérer les produits depuis la base pour prix + stock
-        const ids = articles.map(a => Number(a.id));
-        const produitsDB = await Produit.find({ id: { $in: ids }, actif: true });
-        const produitParId = new Map(produitsDB.map(p => [p.id, p]));
-
+        // Vérification et décrémentation atomique du stock
         let sousTotal = 0;
         const articlesFinaux = [];
-        const stockUpdates = [];
+        const rollback = [];
 
         for (const item of articles) {
             const id = Number(item.id);
@@ -470,14 +494,18 @@ app.post('/api/commandes', async (req, res) => {
                 return res.status(400).json({ erreur: `Quantité invalide pour l'article ${id}.` });
             }
 
-            const produit = produitParId.get(id);
-            if (!produit) {
-                return res.status(400).json({ erreur: `Produit ${id} introuvable ou inactif.` });
-            }
+            const produit = await Produit.findOneAndUpdate(
+                { id, actif: true, quantiteEnStock: { $gte: quantite } },
+                { $inc: { quantiteEnStock: -quantite } },
+                { new: true }
+            );
 
-            if (produit.quantiteEnStock < quantite) {
+            if (!produit) {
+                for (const r of rollback) {
+                    await Produit.findOneAndUpdate({ id: r.id }, { $inc: { quantiteEnStock: r.quantite } });
+                }
                 return res.status(400).json({
-                    erreur: `Stock insuffisant pour "${produit.nom}". Disponible : ${produit.quantiteEnStock}, demandé : ${quantite}.`
+                    erreur: `Stock insuffisant ou produit ${id} introuvable/inactif.`
                 });
             }
 
@@ -493,7 +521,7 @@ app.post('/api/commandes', async (req, res) => {
                 sousTotal: ligneSousTotal
             });
 
-            stockUpdates.push({ id, quantite });
+            rollback.push({ id, quantite });
         }
 
         // Validation et calcul du code promo
