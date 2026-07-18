@@ -141,13 +141,16 @@ app.post('/api/admin/connexion', authLimiter, async (req, res) => {
 // Inscription
 app.post('/api/auth/inscription', authLimiter, async (req, res) => {
     try {
-        const { nom, telephone, email, motdepasse } = req.body;
+        const nom = String(req.body.nom || '').trim();
+        const telephone = String(req.body.telephone || '').trim();
+        const email = String(req.body.email || '').trim();
+        const motdepasse = String(req.body.motdepasse || '');
 
         if (!nom || !telephone || !email || !motdepasse) {
             return res.status(400).json({ succes: false, erreur: 'Tous les champs sont obligatoires.' });
         }
 
-        const emailNormalise = email.toLowerCase().trim();
+        const emailNormalise = email.toLowerCase();
         const existe = await Utilisateur.findOne({ email: emailNormalise });
         if (existe) {
             return res.status(400).json({ succes: false, erreur: 'Un compte existe déjà avec cet email.' });
@@ -178,13 +181,14 @@ app.post('/api/auth/inscription', authLimiter, async (req, res) => {
 // Connexion
 app.post('/api/auth/connexion', authLimiter, async (req, res) => {
     try {
-        const { email, motdepasse } = req.body;
+        const email = String(req.body.email || '').trim();
+        const motdepasse = String(req.body.motdepasse || '');
 
         if (!email || !motdepasse) {
             return res.status(400).json({ succes: false, erreur: 'Email et mot de passe obligatoires.' });
         }
 
-        const emailNormalise = email.toLowerCase().trim();
+        const emailNormalise = email.toLowerCase();
         const utilisateur = await Utilisateur.findOne({ email: emailNormalise });
 
         if (!utilisateur) {
@@ -217,10 +221,10 @@ app.post('/api/auth/connexion', authLimiter, async (req, res) => {
 // Mot de passe oublié — envoyer lien de réinitialisation
 app.post('/api/auth/mot-de-passe-oublie', async (req, res) => {
     try {
-        const { email } = req.body;
+        const email = String(req.body.email || '').trim();
         if (!email) return res.status(400).json({ succes: false, erreur: 'Email obligatoire.' });
 
-        const utilisateur = await Utilisateur.findOne({ email: email.toLowerCase().trim() });
+        const utilisateur = await Utilisateur.findOne({ email: email.toLowerCase() });
 
         // Toujours répondre OK pour ne pas révéler si l'email existe
         if (!utilisateur) {
@@ -397,10 +401,10 @@ app.patch('/api/auth/motdepasse', verifierUtilisateur, async (req, res) => {
 // Vérifier un code promo (partenaire ou HYGIA)
 app.post('/api/verifier-code-promo', async (req, res) => {
     try {
-        const { code } = req.body;
+        const code = String(req.body.code || '').trim();
         if (!code) return res.json({ valide: false });
 
-        const codeNormalise = code.toUpperCase().trim();
+        const codeNormalise = code.toUpperCase();
 
         // Code interne HYGIA : valide 14 jours glissants
         if (codeNormalise === 'HYGIA') {
@@ -429,9 +433,19 @@ app.post('/api/verifier-code-promo', async (req, res) => {
 // Créer une commande (recalcul côté serveur, vérification stock)
 app.post('/api/commandes', async (req, res) => {
     try {
-        const { client, articles, codePromo, modePaiement, zoneLivraison } = req.body;
+        const { articles } = req.body;
+        const client = {
+            nom: String(req.body.client?.nom || '').trim(),
+            telephone: String(req.body.client?.telephone || '').trim(),
+            adresse: String(req.body.client?.adresse || '').trim(),
+            commune: String(req.body.client?.commune || '').trim(),
+            email: String(req.body.client?.email || '').trim().toLowerCase()
+        };
+        const codePromo = String(req.body.codePromo || '').trim();
+        const modePaiement = String(req.body.modePaiement || '').trim();
+        const zoneLivraison = String(req.body.zoneLivraison || '').trim();
 
-        if (!client || !client.nom || !client.telephone || !client.adresse || !client.commune) {
+        if (!client.nom || !client.telephone || !client.adresse || !client.commune) {
             return res.status(400).json({ erreur: 'Informations de livraison incomplètes.' });
         }
 
@@ -488,7 +502,7 @@ app.post('/api/commandes', async (req, res) => {
         let livraisonGratuite = false;
 
         if (codePromo) {
-            const codeNormalise = codePromo.toUpperCase().trim();
+            const codeNormalise = codePromo.toUpperCase();
 
             if (codeNormalise === 'HYGIA') {
                 const promoEndDate = new Date();
@@ -533,18 +547,12 @@ app.post('/api/commandes', async (req, res) => {
         }
 
         // Déterminer le statut selon le mode de paiement
-        const modeNormalise = (modePaiement || '').toLowerCase();
+        const modeNormalise = modePaiement.toLowerCase();
         const estPaiementLivraison = modeNormalise.includes('livraison');
         const statut = estPaiementLivraison ? 'En attente' : 'En attente paiement';
 
         const commande = new Commande({
-            client: {
-                nom: client.nom,
-                telephone: client.telephone,
-                adresse: client.adresse,
-                commune: client.commune || '',
-                email: client.email || ''
-            },
+            client,
             articles: articlesFinaux,
             total: totalFinal,
             fraisLivraison,
@@ -594,22 +602,25 @@ app.get('/api/mes-commandes', verifierUtilisateur, async (req, res) => {
 // Créer un partenaire
 app.post('/api/admin/partenaires', verifierAdmin, async (req, res) => {
     try {
-        const { nom, email, telephone, codePromo } = req.body;
+        const nom = String(req.body.nom || '').trim();
+        const email = String(req.body.email || '').trim().toLowerCase();
+        const telephone = String(req.body.telephone || '').trim();
+        const codePromo = String(req.body.codePromo || '').trim();
 
         if (!nom || !codePromo) {
             return res.status(400).json({ succes: false, erreur: 'Nom et code promo obligatoires.' });
         }
 
-        const codeNormalise = codePromo.toUpperCase().trim();
+        const codeNormalise = codePromo.toUpperCase();
         const existe = await Partenaire.findOne({ codePromo: codeNormalise });
         if (existe) {
             return res.status(400).json({ succes: false, erreur: 'Ce code promo est déjà utilisé.' });
         }
 
         const partenaire = new Partenaire({
-            nom: nom.trim(),
-            email: (email || '').trim(),
-            telephone: (telephone || '').trim(),
+            nom,
+            email,
+            telephone,
             codePromo: codeNormalise
         });
 
@@ -718,17 +729,20 @@ app.get('/api/admin/partenaires/:id', verifierAdmin, async (req, res) => {
 // Modifier un partenaire (infos ou statut actif/inactif)
 app.patch('/api/admin/partenaires/:id', verifierAdmin, async (req, res) => {
     try {
-        const { nom, email, telephone, actif } = req.body;
+        const nom = String(req.body.nom || '').trim();
+        const email = String(req.body.email || '').trim().toLowerCase();
+        const telephone = String(req.body.telephone || '').trim();
+        const actif = req.body.actif === true || req.body.actif === 'true';
         const partenaire = await Partenaire.findById(req.params.id);
 
         if (!partenaire) {
             return res.status(404).json({ succes: false, erreur: 'Partenaire introuvable.' });
         }
 
-        if (nom !== undefined) partenaire.nom = nom.trim();
-        if (email !== undefined) partenaire.email = email.trim();
-        if (telephone !== undefined) partenaire.telephone = telephone.trim();
-        if (actif !== undefined) partenaire.actif = actif;
+        if (nom) partenaire.nom = nom;
+        if (email) partenaire.email = email;
+        if (telephone) partenaire.telephone = telephone;
+        partenaire.actif = actif;
 
         await partenaire.save();
         return res.json({ succes: true, partenaire });
