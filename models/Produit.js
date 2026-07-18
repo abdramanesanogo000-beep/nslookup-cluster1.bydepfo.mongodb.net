@@ -47,6 +47,20 @@ const produitSchema = new mongoose.Schema({
         type: String,
         default: '',
         trim: true
+    },
+    marque: {
+        type: String,
+        default: '',
+        trim: true
+    },
+    certifications: {
+        type: [String],
+        default: []
+    },
+    notice: {
+        type: String,
+        default: '',
+        trim: true
     }
 }, { timestamps: true });
 

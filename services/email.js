@@ -294,9 +294,61 @@ L'équipe Hygia`;
     return envoyerEmail({ to: email, subject: sujet, text: texte, html });
 }
 
+async function envoyerEmailNotificationStatutCommande(commande, ancienStatut) {
+    const { nom, email } = commande.client || {};
+    if (!email) return { succes: false, raison: 'Email client manquant' };
+
+    const sujet = `Votre commande ${commande.numero} est ${commande.statut} — Hygia`;
+
+    const texte = `Bonjour ${nom || 'client'},
+
+Votre commande ${commande.numero} a évolué.
+
+Ancien statut : ${ancienStatut || 'Nouvelle'}
+Nouveau statut : ${commande.statut}
+Total : ${formaterPrixFCFA(commande.total)}
+
+Vous pouvez consulter vos commandes ici :
+${FRONTEND_URL}/compte.html
+
+L'équipe Hygia`;
+
+    const html = `<!DOCTYPE html>
+<html lang='fr'>
+<head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Statut commande</title></head>
+<body style='margin:0;padding:0;background:#f0f4f8;font-family: Segoe UI, Arial, sans-serif;'>
+<div style='max-width:560px;margin:30px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
+  <div style='background:linear-gradient(135deg,#185FA5,#0e3d6e);padding:30px 28px;text-align:center;'>
+    <div style='font-size:30px;font-weight:900;color:#fff;letter-spacing:2px;'>HYGIA</div>
+    <div style='color:#a8d0f7;font-size:12px;margin-top:4px;'>MATÉRIEL MÉDICAL PROFESSIONNEL — BAMAKO</div>
+  </div>
+  <div style='padding:32px 28px;'>
+    <h2 style='color:#185FA5;margin:0 0 20px;font-size:20px;'>Mise à jour de votre commande</h2>
+    <p style='font-size:14px;color:#333;'>Bonjour <strong>${nom || 'client'}</strong>,</p>
+    <p style='font-size:14px;color:#555;'>Votre commande <strong>${commande.numero}</strong> a changé de statut.</p>
+    <div style='background:#f0f4f8;border-radius:8px;padding:16px;margin:20px 0;'>
+      <p style='margin:0 0 8px;font-size:14px;'><strong>Ancien statut :</strong> ${ancienStatut || 'Nouvelle'}</p>
+      <p style='margin:0;font-size:14px;'><strong>Nouveau statut :</strong> ${commande.statut}</p>
+      <p style='margin:8px 0 0;font-size:14px;'><strong>Total :</strong> ${formaterPrixFCFA(commande.total)}</p>
+    </div>
+    <div style='text-align:center;margin:28px 0;'>
+      <a href='${FRONTEND_URL}/compte.html' style='display:inline-block;background:#185FA5;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:700;'>Voir mes commandes →</a>
+    </div>
+  </div>
+  <div style='background:#f0f4f8;padding:18px 28px;text-align:center;border-top:1px solid #e8eef5;'>
+    <p style='margin:0;font-size:11px;color:#888;'>© ${new Date().getFullYear()} Hygia — Matériel médical professionnel à Bamako, Mali</p>
+  </div>
+</div>
+</body>
+</html>`;
+
+    return envoyerEmail({ to: email, subject: sujet, text: texte, html });
+}
+
 module.exports = {
     envoyerEmailBienvenue,
     envoyerEmailRecapCommande,
     envoyerEmailReinitialisationMotDePasse,
+    envoyerEmailNotificationStatutCommande,
     emailActif
 };

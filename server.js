@@ -18,9 +18,10 @@ const Commande = require('./models/Commande');
 const Utilisateur = require('./models/Utilisateur');
 const Partenaire = require('./models/Partenaire');
 const Produit = require('./models/Produit');
+const Favori = require('./models/Favori');
 const produitsSeed = require('./data/produits');
 const crypto = require('crypto');
-const { envoyerEmailBienvenue, envoyerEmailRecapCommande, envoyerEmailReinitialisationMotDePasse } = require('./services/email');
+const { envoyerEmailBienvenue, envoyerEmailRecapCommande, envoyerEmailReinitialisationMotDePasse, envoyerEmailNotificationStatutCommande } = require('./services/email');
 
 const { signUserToken, verifierUtilisateur } = require('./middleware/auth');
 const { signAdminToken, verifierAdmin, verifierMotDePasseAdmin } = require('./middleware/adminAuth');
@@ -136,6 +137,76 @@ app.get('/api/produits', async (req, res) => {
         res.json({ succes: true, produits });
     } catch (error) {
         console.error('Erreur GET /api/produits :', error);
+        res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Recherche et filtres côté serveur (catalogue)
+app.get('/api/produits/recherche', async (req, res) => {
+    try {
+        const q = String(req.query.q || '').trim();
+        const categorie = String(req.query.categorie || '').trim().toLowerCase();
+        const minPrix = Number(req.query.minPrix) || 0;
+        const maxPrix = Number(req.query.maxPrix) || 0;
+        const sort = String(req.query.sort || 'id').toLowerCase();
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+
+        const filter = { actif: true };
+        if (categorie) filter.categorie = categorie;
+        if (q) {
+            filter.$or = [
+                { nom: { $regex: q, $options: 'i' } },
+                { description: { $regex: q, $options: 'i' } }
+            ];
+        }
+        if (minPrix > 0 || maxPrix > 0) {
+            filter.prix = {};
+            if (minPrix > 0) filter.prix.$gte = minPrix;
+            if (maxPrix > 0) filter.prix.$lte = maxPrix;
+        }
+
+        const sortOption = {};
+        if (['prix', 'nom', 'categorie'].includes(sort)) {
+            sortOption[sort] = 1;
+        } else {
+            sortOption.id = 1;
+        }
+
+        const total = await Produit.countDocuments(filter);
+        const produits = await Produit.find(filter)
+            .sort(sortOption)
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .select('-_id id nom prix image categorie description quantiteEnStock');
+
+        res.json({
+            succes: true,
+            produits,
+            total,
+            page,
+            pages: Math.ceil(total / limit)
+        });
+    } catch (error) {
+        console.error('Erreur GET /api/produits/recherche :', error);
+        res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Détail d'un produit (fiche enrichie)
+app.get('/api/produits/:id', async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ succes: false, erreur: 'ID produit invalide.' });
+        }
+        const produit = await Produit.findOne({ id, actif: true }).select('-_id');
+        if (!produit) {
+            return res.status(404).json({ succes: false, erreur: 'Produit introuvable.' });
+        }
+        res.json({ succes: true, produit });
+    } catch (error) {
+        console.error('Erreur GET /api/produits/:id :', error);
         res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
     }
 });
@@ -623,6 +694,62 @@ app.get('/api/mes-commandes', verifierUtilisateur, async (req, res) => {
     }
 });
 
+// Favoris d'un client (JWT requis)
+app.get('/api/favoris', verifierUtilisateur, async (req, res) => {
+    try {
+        const favoris = await Favori.find({ utilisateurId: req.user._id });
+        const ids = favoris.map(f => f.produitId);
+        const produits = await Produit.find({ id: { $in: ids }, actif: true }).select('-_id id nom prix image categorie description');
+        return res.json({ succes: true, favoris: produits });
+    } catch (error) {
+        console.error('Erreur GET /api/favoris :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Ajouter un favori
+app.post('/api/favoris', verifierUtilisateur, async (req, res) => {
+    try {
+        const produitId = Number(req.body.produitId);
+        if (isNaN(produitId)) {
+            return res.status(400).json({ succes: false, erreur: 'produitId invalide.' });
+        }
+
+        const produit = await Produit.findOne({ id: produitId, actif: true });
+        if (!produit) {
+            return res.status(404).json({ succes: false, erreur: 'Produit introuvable.' });
+        }
+
+        const favori = new Favori({ utilisateurId: req.user._id, produitId });
+        await favori.save();
+        return res.status(201).json({ succes: true, message: 'Ajouté aux favoris.' });
+    } catch (error) {
+        if (error.code === 11000) {
+            return res.status(409).json({ succes: false, erreur: 'Produit déjà en favoris.' });
+        }
+        console.error('Erreur POST /api/favoris :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Supprimer un favori
+app.delete('/api/favoris/:id', verifierUtilisateur, async (req, res) => {
+    try {
+        const produitId = Number(req.params.id);
+        if (isNaN(produitId)) {
+            return res.status(400).json({ succes: false, erreur: 'ID favori invalide.' });
+        }
+        const result = await Favori.deleteOne({ utilisateurId: req.user._id, produitId });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ succes: false, erreur: 'Favori introuvable.' });
+        }
+        return res.json({ succes: true, message: 'Favori supprimé.' });
+    } catch (error) {
+        console.error('Erreur DELETE /api/favoris/:id :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
 // ===========================================
 // ADMIN — GESTION DES PARTENAIRES
 // ===========================================
@@ -790,6 +917,106 @@ app.delete('/api/admin/partenaires/:id', verifierAdmin, async (req, res) => {
         return res.json({ succes: true, message: 'Partenaire supprimé.' });
     } catch (error) {
         console.error('Erreur DELETE /api/admin/partenaires/:id :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// ===========================================
+// ADMIN — GESTION DES PRODUITS (CRUD)
+// ===========================================
+
+// Lister tous les produits (admin)
+app.get('/api/admin/produits', verifierAdmin, async (req, res) => {
+    try {
+        const produits = await Produit.find().sort({ id: 1 }).select('-_id');
+        return res.json({ succes: true, produits });
+    } catch (error) {
+        console.error('Erreur GET /api/admin/produits :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Créer un produit
+app.post('/api/admin/produits', verifierAdmin, async (req, res) => {
+    try {
+        const nom = String(req.body.nom || '').trim();
+        const prix = Number(req.body.prix);
+        const quantiteEnStock = Number(req.body.quantiteEnStock) || 0;
+
+        if (!nom || isNaN(prix) || prix < 0) {
+            return res.status(400).json({ succes: false, erreur: 'Nom et prix valides obligatoires.' });
+        }
+
+        const last = await Produit.findOne().sort({ id: -1 });
+        const nextId = (last?.id || 0) + 1;
+
+        const produit = new Produit({
+            id: nextId,
+            nom,
+            prix,
+            image: String(req.body.image || '').trim(),
+            categorie: String(req.body.categorie || '').trim().toLowerCase(),
+            description: String(req.body.description || '').trim(),
+            quantiteEnStock,
+            reference: String(req.body.reference || '').trim(),
+            marque: String(req.body.marque || '').trim(),
+            certifications: Array.isArray(req.body.certifications) ? req.body.certifications.map(c => String(c).trim()).filter(Boolean) : [],
+            notice: String(req.body.notice || '').trim()
+        });
+
+        await produit.save();
+        return res.status(201).json({ succes: true, produit: await Produit.findOne({ id: nextId }).select('-_id') });
+    } catch (error) {
+        console.error('Erreur POST /api/admin/produits :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Modifier un produit
+app.patch('/api/admin/produits/:id', verifierAdmin, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ succes: false, erreur: 'ID produit invalide.' });
+        }
+
+        const update = {};
+        const champs = ['nom', 'image', 'categorie', 'description', 'reference', 'marque', 'notice'];
+        champs.forEach(c => {
+            if (typeof req.body[c] !== 'undefined') update[c] = String(req.body[c]).trim();
+        });
+        if (typeof req.body.prix !== 'undefined') update.prix = Number(req.body.prix);
+        if (typeof req.body.quantiteEnStock !== 'undefined') update.quantiteEnStock = Number(req.body.quantiteEnStock);
+        if (typeof req.body.actif !== 'undefined') update.actif = Boolean(req.body.actif);
+        if (Array.isArray(req.body.certifications)) {
+            update.certifications = req.body.certifications.map(c => String(c).trim()).filter(Boolean);
+        }
+
+        const produit = await Produit.findOneAndUpdate({ id }, { $set: update }, { new: true, runValidators: true }).select('-_id');
+        if (!produit) {
+            return res.status(404).json({ succes: false, erreur: 'Produit introuvable.' });
+        }
+        return res.json({ succes: true, produit });
+    } catch (error) {
+        console.error('Erreur PATCH /api/admin/produits/:id :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Supprimer un produit
+app.delete('/api/admin/produits/:id', verifierAdmin, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ succes: false, erreur: 'ID produit invalide.' });
+        }
+        const produit = await Produit.findOneAndDelete({ id });
+        if (!produit) {
+            return res.status(404).json({ succes: false, erreur: 'Produit introuvable.' });
+        }
+        return res.json({ succes: true, message: 'Produit supprimé.' });
+    } catch (error) {
+        console.error('Erreur DELETE /api/admin/produits/:id :', error);
         return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
     }
 });
@@ -1010,6 +1237,8 @@ app.patch('/api/admin/commandes/:numero/statut', verifierAdmin, async (req, res)
         if (statut) update.statut = statut;
         if (typeof notes !== 'undefined') update.notes = notes;
 
+        const avant = await Commande.findOne({ numero: req.params.numero }).select('statut client email');
+
         const commande = await Commande.findOneAndUpdate(
             { numero: req.params.numero },
             { $set: update },
@@ -1018,6 +1247,12 @@ app.patch('/api/admin/commandes/:numero/statut', verifierAdmin, async (req, res)
 
         if (!commande) {
             return res.status(404).json({ erreur: 'Commande introuvable.' });
+        }
+
+        if (avant && avant.statut !== commande.statut) {
+            envoyerEmailNotificationStatutCommande(commande, avant.statut).catch(err => {
+                console.error('Erreur email notification statut :', err);
+            });
         }
 
         return res.json({ succes: true, commande });
