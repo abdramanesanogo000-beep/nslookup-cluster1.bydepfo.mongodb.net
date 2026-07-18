@@ -11,20 +11,54 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const helmet = require('helmet');
 require('dotenv').config();
 
 const Commande = require('./models/Commande');
 const Utilisateur = require('./models/Utilisateur');
 const Partenaire = require('./models/Partenaire');
+const Produit = require('./models/Produit');
+const produitsSeed = require('./data/produits');
 const crypto = require('crypto');
 const { envoyerEmailBienvenue, envoyerEmailRecapCommande, envoyerEmailReinitialisationMotDePasse } = require('./services/email');
+
+const { signUserToken, verifierUtilisateur } = require('./middleware/auth');
+const { signAdminToken, verifierAdmin, verifierMotDePasseAdmin } = require('./middleware/adminAuth');
+const { globalLimiter, authLimiter } = require('./middleware/rateLimit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS — autorise toutes les origines (adapter en production si besoin)
-app.use(cors());
+// Vérifications critiques de configuration
+if (!process.env.JWT_SECRET) {
+    console.error('❌ JWT_SECRET manquant dans .env');
+    process.exit(1);
+}
+if (!process.env.MONGODB_URI) {
+    console.error('❌ MONGODB_URI manquant dans .env');
+    process.exit(1);
+}
+if (!process.env.ADMIN_PASSWORD_HASH) {
+    console.warn('⚠️ ADMIN_PASSWORD_HASH manquant. La connexion admin sera refusée.');
+}
+
+// CORS restreint aux origines autorisées
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5500,http://localhost:5501,http://127.0.0.1:5500').split(',').map(o => o.trim());
+app.use(cors({
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            console.warn('CORS rejeté :', origin);
+            callback(new Error('CORS non autorisé'));
+        }
+    },
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
+app.use(globalLimiter);
 
 // Middleware de log simple
 app.use((req, res, next) => {
@@ -47,20 +81,57 @@ function calculerCommission(totalFCFA) {
     return { taux, montant: Math.round(totalFCFA * taux / 100) };
 }
 
-// Vérification mot de passe admin
-function verifierAdmin(req, res, next) {
-    const password = req.headers['x-admin-password'];
-
-    if (!password || password !== process.env.ADMIN_PASSWORD) {
-        return res.status(401).json({ erreur: 'Non autorisé' });
-    }
-
-    next();
-}
+// Authentification admin centralisée dans middleware/adminAuth.js (JWT + bcrypt)
 
 // Health check
 app.get('/', (req, res) => {
     res.json({ statut: 'OK', service: 'Hygia API', version: '2.0' });
+});
+
+// Seeding automatique des produits si la collection est vide
+async function seedProduits() {
+    try {
+        const count = await Produit.countDocuments();
+        if (count === 0) {
+            await Produit.insertMany(produitsSeed);
+            console.log(`✅ ${produitsSeed.length} produits seedés.`);
+        }
+    } catch (err) {
+        console.error('❌ Erreur seed produits :', err);
+    }
+}
+
+// Liste publique des produits (catalogue)
+app.get('/api/produits', async (req, res) => {
+    try {
+        const produits = await Produit.find({ actif: true }).sort({ id: 1 }).select('-_id id nom prix image categorie description quantiteEnStock');
+        res.json({ succes: true, produits });
+    } catch (error) {
+        console.error('Erreur GET /api/produits :', error);
+        res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Connexion admin (token JWT)
+app.post('/api/admin/connexion', authLimiter, async (req, res) => {
+    try {
+        const { motdepasse } = req.body;
+        if (!motdepasse) {
+            return res.status(400).json({ succes: false, erreur: 'Mot de passe obligatoire.' });
+        }
+        if (!process.env.ADMIN_PASSWORD_HASH) {
+            return res.status(500).json({ succes: false, erreur: 'Configuration admin incomplète.' });
+        }
+        const valide = await verifierMotDePasseAdmin(motdepasse);
+        if (!valide) {
+            return res.status(401).json({ succes: false, erreur: 'Mot de passe incorrect.' });
+        }
+        const token = signAdminToken();
+        res.json({ succes: true, token });
+    } catch (error) {
+        console.error('Erreur /api/admin/connexion :', error);
+        res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
 });
 
 // ===========================================
@@ -68,7 +139,7 @@ app.get('/', (req, res) => {
 // ===========================================
 
 // Inscription
-app.post('/api/auth/inscription', async (req, res) => {
+app.post('/api/auth/inscription', authLimiter, async (req, res) => {
     try {
         const { nom, telephone, email, motdepasse } = req.body;
 
@@ -90,10 +161,13 @@ app.post('/api/auth/inscription', async (req, res) => {
             console.error('Erreur email de bienvenue :', err);
         });
 
+        const token = signUserToken(utilisateur);
+
         return res.status(201).json({
             succes: true,
             message: 'Compte créé avec succès.',
-            utilisateur: { nom, email: emailNormalise }
+            token,
+            utilisateur: { nom: utilisateur.nom, email: utilisateur.email, telephone: utilisateur.telephone }
         });
     } catch (error) {
         console.error('Erreur POST /api/auth/inscription :', error);
@@ -102,7 +176,7 @@ app.post('/api/auth/inscription', async (req, res) => {
 });
 
 // Connexion
-app.post('/api/auth/connexion', async (req, res) => {
+app.post('/api/auth/connexion', authLimiter, async (req, res) => {
     try {
         const { email, motdepasse } = req.body;
 
@@ -122,9 +196,12 @@ app.post('/api/auth/connexion', async (req, res) => {
             return res.status(401).json({ succes: false, erreur: 'Email ou mot de passe incorrect.' });
         }
 
+        const token = signUserToken(utilisateur);
+
         return res.json({
             succes: true,
             message: 'Connexion réussie.',
+            token,
             utilisateur: {
                 nom: utilisateur.nom,
                 email: utilisateur.email,
@@ -200,18 +277,15 @@ app.post('/api/auth/reinitialiser-mot-de-passe', async (req, res) => {
     }
 });
 
-// Supprimer un compte utilisateur
-app.delete('/api/auth/supprimer', async (req, res) => {
+// Supprimer un compte utilisateur (JWT requis)
+app.delete('/api/auth/supprimer', verifierUtilisateur, async (req, res) => {
     try {
-        const { email, motdepasse } = req.body;
-
-        if (!email || !motdepasse) {
-            return res.status(400).json({ succes: false, erreur: 'Email et mot de passe obligatoires.' });
+        const { motdepasse } = req.body;
+        if (!motdepasse) {
+            return res.status(400).json({ succes: false, erreur: 'Mot de passe obligatoire.' });
         }
 
-        const emailNormalise = email.toLowerCase().trim();
-        const utilisateur = await Utilisateur.findOne({ email: emailNormalise });
-
+        const utilisateur = await Utilisateur.findById(req.user._id);
         if (!utilisateur) {
             return res.status(404).json({ succes: false, erreur: 'Compte introuvable.' });
         }
@@ -221,8 +295,7 @@ app.delete('/api/auth/supprimer', async (req, res) => {
             return res.status(401).json({ succes: false, erreur: 'Mot de passe incorrect.' });
         }
 
-        await Utilisateur.deleteOne({ email: emailNormalise });
-
+        await Utilisateur.deleteOne({ _id: req.user._id });
         return res.json({ succes: true, message: 'Compte supprimé avec succès.' });
     } catch (error) {
         console.error('Erreur DELETE /api/auth/supprimer :', error);
@@ -230,27 +303,13 @@ app.delete('/api/auth/supprimer', async (req, res) => {
     }
 });
 
-// Consulter le profil (avec vérification du mot de passe)
-app.post('/api/auth/profil', async (req, res) => {
+// Consulter le profil (JWT requis)
+app.get('/api/auth/profil', verifierUtilisateur, async (req, res) => {
     try {
-        const { email, motdepasse } = req.body;
-
-        if (!email || !motdepasse) {
-            return res.status(400).json({ succes: false, erreur: 'Email et mot de passe obligatoires.' });
-        }
-
-        const emailNormalise = email.toLowerCase().trim();
-        const utilisateur = await Utilisateur.findOne({ email: emailNormalise });
-
+        const utilisateur = await Utilisateur.findById(req.user._id).select('-motdepasse -resetToken -resetTokenExpire');
         if (!utilisateur) {
             return res.status(404).json({ succes: false, erreur: 'Compte introuvable.' });
         }
-
-        const motDePasseValide = await utilisateur.comparerMotDePasse(motdepasse);
-        if (!motDePasseValide) {
-            return res.status(401).json({ succes: false, erreur: 'Mot de passe incorrect.' });
-        }
-
         return res.json({
             succes: true,
             utilisateur: {
@@ -260,23 +319,20 @@ app.post('/api/auth/profil', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Erreur POST /api/auth/profil :', error);
+        console.error('Erreur GET /api/auth/profil :', error);
         return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
     }
 });
 
-// Modifier le profil (nom, téléphone)
-app.patch('/api/auth/profil', async (req, res) => {
+// Modifier le profil (nom, téléphone) — JWT requis
+app.patch('/api/auth/profil', verifierUtilisateur, async (req, res) => {
     try {
-        const { email, motdepasse, nom, telephone } = req.body;
-
-        if (!email || !motdepasse) {
-            return res.status(400).json({ succes: false, erreur: 'Email et mot de passe obligatoires.' });
+        const { motdepasse, nom, telephone } = req.body;
+        if (!motdepasse) {
+            return res.status(400).json({ succes: false, erreur: 'Mot de passe actuel obligatoire.' });
         }
 
-        const emailNormalise = email.toLowerCase().trim();
-        const utilisateur = await Utilisateur.findOne({ email: emailNormalise });
-
+        const utilisateur = await Utilisateur.findById(req.user._id);
         if (!utilisateur) {
             return res.status(404).json({ succes: false, erreur: 'Compte introuvable.' });
         }
@@ -305,12 +361,12 @@ app.patch('/api/auth/profil', async (req, res) => {
     }
 });
 
-// Changer le mot de passe
-app.patch('/api/auth/motdepasse', async (req, res) => {
+// Changer le mot de passe — JWT requis
+app.patch('/api/auth/motdepasse', verifierUtilisateur, async (req, res) => {
     try {
-        const { email, ancienMotdepasse, nouveauMotdepasse } = req.body;
+        const { ancienMotdepasse, nouveauMotdepasse } = req.body;
 
-        if (!email || !ancienMotdepasse || !nouveauMotdepasse) {
+        if (!ancienMotdepasse || !nouveauMotdepasse) {
             return res.status(400).json({ succes: false, erreur: 'Tous les champs sont obligatoires.' });
         }
 
@@ -318,9 +374,7 @@ app.patch('/api/auth/motdepasse', async (req, res) => {
             return res.status(400).json({ succes: false, erreur: 'Le nouveau mot de passe doit contenir au moins 6 caractères.' });
         }
 
-        const emailNormalise = email.toLowerCase().trim();
-        const utilisateur = await Utilisateur.findOne({ email: emailNormalise });
-
+        const utilisateur = await Utilisateur.findById(req.user._id);
         if (!utilisateur) {
             return res.status(404).json({ succes: false, erreur: 'Compte introuvable.' });
         }
@@ -340,14 +394,24 @@ app.patch('/api/auth/motdepasse', async (req, res) => {
     }
 });
 
-// Vérifier un code promo partenaire (public, utilisé au panier)
+// Vérifier un code promo (partenaire ou HYGIA)
 app.post('/api/verifier-code-promo', async (req, res) => {
     try {
         const { code } = req.body;
         if (!code) return res.json({ valide: false });
 
+        const codeNormalise = code.toUpperCase().trim();
+
+        // Code interne HYGIA : valide 14 jours glissants
+        if (codeNormalise === 'HYGIA') {
+            const promoEndDate = new Date();
+            promoEndDate.setDate(promoEndDate.getDate() + 14);
+            const isActive = new Date() <= promoEndDate;
+            return res.json({ valide: isActive, reduction: 5, type: 'hygia' });
+        }
+
         const partenaire = await Partenaire.findOne({
-            codePromo: code.toUpperCase().trim(),
+            codePromo: codeNormalise,
             actif: true
         });
 
@@ -355,17 +419,17 @@ app.post('/api/verifier-code-promo', async (req, res) => {
             return res.json({ valide: false });
         }
 
-        return res.json({ valide: true, reduction: REDUCTION_CLIENT_PARTENAIRE });
+        return res.json({ valide: true, reduction: REDUCTION_CLIENT_PARTENAIRE, type: 'partenaire' });
     } catch (error) {
         console.error('Erreur /api/verifier-code-promo :', error);
         return res.status(500).json({ valide: false, erreur: 'Erreur serveur.' });
     }
 });
 
-// Créer une commande (appelé depuis yames.js)
+// Créer une commande (recalcul côté serveur, vérification stock)
 app.post('/api/commandes', async (req, res) => {
     try {
-        const { client, articles, total, sousTotal, shipping, codePromoPartenaire, modePaiement } = req.body;
+        const { client, articles, codePromo, modePaiement, zoneLivraison } = req.body;
 
         if (!client || !client.nom || !client.telephone || !client.adresse || !client.commune) {
             return res.status(400).json({ erreur: 'Informations de livraison incomplètes.' });
@@ -375,25 +439,103 @@ app.post('/api/commandes', async (req, res) => {
             return res.status(400).json({ erreur: 'La commande doit contenir au moins un article.' });
         }
 
-        const fraisLivraison = Number(shipping) || 0;
-        let totalFinal = total;
-        let reductionPartenaire = 0;
-        let codePartenaireValide = '';
+        // Récupérer les produits depuis la base pour prix + stock
+        const ids = articles.map(a => Number(a.id));
+        const produitsDB = await Produit.find({ id: { $in: ids }, actif: true });
+        const produitParId = new Map(produitsDB.map(p => [p.id, p]));
 
-        // Si un code partenaire est fourni, on revalide et on recalcule la réduction côté serveur
-        if (codePromoPartenaire) {
-            const partenaire = await Partenaire.findOne({
-                codePromo: codePromoPartenaire.toUpperCase().trim(),
-                actif: true
+        let sousTotal = 0;
+        const articlesFinaux = [];
+        const stockUpdates = [];
+
+        for (const item of articles) {
+            const id = Number(item.id);
+            const quantite = Number(item.quantite) || 0;
+
+            if (!quantite || quantite < 1) {
+                return res.status(400).json({ erreur: `Quantité invalide pour l'article ${id}.` });
+            }
+
+            const produit = produitParId.get(id);
+            if (!produit) {
+                return res.status(400).json({ erreur: `Produit ${id} introuvable ou inactif.` });
+            }
+
+            if (produit.quantiteEnStock < quantite) {
+                return res.status(400).json({
+                    erreur: `Stock insuffisant pour "${produit.nom}". Disponible : ${produit.quantiteEnStock}, demandé : ${quantite}.`
+                });
+            }
+
+            const prixUnitaire = produit.prix;
+            const ligneSousTotal = prixUnitaire * quantite;
+            sousTotal += ligneSousTotal;
+
+            articlesFinaux.push({
+                id,
+                nom: produit.nom,
+                prix: prixUnitaire,
+                quantite,
+                sousTotal: ligneSousTotal
             });
 
-            if (partenaire) {
-                const base = typeof sousTotal === 'number' ? sousTotal : total;
-                reductionPartenaire = Math.floor(base * REDUCTION_CLIENT_PARTENAIRE / 100);
-                totalFinal = Math.max(0, base - reductionPartenaire) + fraisLivraison;
-                codePartenaireValide = partenaire.codePromo;
+            stockUpdates.push({ id, quantite });
+        }
+
+        // Validation et calcul du code promo
+        let reduction = 0;
+        let codePromoValide = '';
+        let livraisonGratuite = false;
+
+        if (codePromo) {
+            const codeNormalise = codePromo.toUpperCase().trim();
+
+            if (codeNormalise === 'HYGIA') {
+                const promoEndDate = new Date();
+                promoEndDate.setDate(promoEndDate.getDate() + 14);
+                if (new Date() <= promoEndDate) {
+                    reduction = Math.floor(sousTotal * 5 / 100);
+                    codePromoValide = 'HYGIA';
+                    livraisonGratuite = true;
+                }
+            } else {
+                const partenaire = await Partenaire.findOne({
+                    codePromo: codeNormalise,
+                    actif: true
+                });
+                if (partenaire) {
+                    reduction = Math.floor(sousTotal * REDUCTION_CLIENT_PARTENAIRE / 100);
+                    codePromoValide = partenaire.codePromo;
+                    livraisonGratuite = true;
+                }
             }
         }
+
+        // Calcul des frais de livraison
+        let fraisLivraison = 0;
+        if (!livraisonGratuite) {
+            fraisLivraison = zoneLivraison ? 1000 : 0;
+        }
+
+        const totalFinal = Math.max(0, sousTotal - reduction + fraisLivraison);
+
+        // Décrémentation atomique du stock
+        for (const upd of stockUpdates) {
+            const result = await Produit.updateOne(
+                { id: upd.id, quantiteEnStock: { $gte: upd.quantite } },
+                { $inc: { quantiteEnStock: -upd.quantite } }
+            );
+            if (result.modifiedCount !== 1) {
+                return res.status(409).json({
+                    erreur: `Le stock du produit ${upd.id} a changé entre temps. Veuillez rafraîchir votre panier.`
+                });
+            }
+        }
+
+        // Déterminer le statut selon le mode de paiement
+        const modeNormalise = (modePaiement || '').toLowerCase();
+        const estPaiementLivraison = modeNormalise.includes('livraison');
+        const statut = estPaiementLivraison ? 'En attente' : 'En attente paiement';
 
         const commande = new Commande({
             client: {
@@ -403,12 +545,13 @@ app.post('/api/commandes', async (req, res) => {
                 commune: client.commune || '',
                 email: client.email || ''
             },
-            articles,
+            articles: articlesFinaux,
             total: totalFinal,
             fraisLivraison,
             modePaiement,
-            codePromoPartenaire: codePartenaireValide,
-            reductionPartenaire
+            statut,
+            codePromoPartenaire: codePromoValide,
+            reductionPartenaire: reduction
         });
 
         await commande.save();
@@ -420,6 +563,8 @@ app.post('/api/commandes', async (req, res) => {
         return res.status(201).json({
             succes: true,
             numero: commande.numero,
+            total: commande.total,
+            statut: commande.statut,
             message: `Commande ${commande.numero} enregistrée.`
         });
     } catch (error) {
@@ -428,13 +573,10 @@ app.post('/api/commandes', async (req, res) => {
     }
 });
 
-// Commandes d'un client (par email)
-app.get('/api/mes-commandes', async (req, res) => {
+// Commandes d'un client (JWT requis)
+app.get('/api/mes-commandes', verifierUtilisateur, async (req, res) => {
     try {
-        const email = req.query.email;
-        if (!email) return res.status(400).json({ succes: false, erreur: 'Email obligatoire.' });
-
-        const commandes = await Commande.find({ 'client.email': email.toLowerCase().trim() })
+        const commandes = await Commande.find({ 'client.email': req.user.email.toLowerCase().trim() })
             .sort({ date: -1 })
             .select('numero date articles total modePaiement statut client');
 
@@ -885,8 +1027,9 @@ app.use((req, res) => {
 
 // Connexion MongoDB
 mongoose.connect(process.env.MONGODB_URI)
-    .then(() => {
+    .then(async () => {
         console.log('✅ Connecté à MongoDB');
+        await seedProduits();
         app.listen(PORT, () => {
             console.log(`🚀 Serveur démarré sur le port ${PORT}`);
         });
