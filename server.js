@@ -72,10 +72,10 @@ if (!process.env.ADMIN_PASSWORD_HASH) {
 }
 
 // CORS restreint aux origines autorisées
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5500,http://localhost:5501,http://127.0.0.1:5500').split(',').map(o => o.trim());
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5500,http://localhost:5501,http://127.0.0.1:5500,https://abdramanesanogo000-beep.github.io,null').split(',').map(o => o.trim());
 app.use(cors({
     origin: function (origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             console.warn('CORS rejeté :', origin);
