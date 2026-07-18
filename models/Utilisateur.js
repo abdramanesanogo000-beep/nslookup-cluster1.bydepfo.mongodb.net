@@ -35,6 +35,23 @@ const utilisateurSchema = new mongoose.Schema({
     resetTokenExpire: {
         type: Date,
         default: null
+    },
+    pointsFidelite: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    codeParrainage: {
+        type: String,
+        unique: true,
+        sparse: true,
+        trim: true,
+        uppercase: true
+    },
+    parrain: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Utilisateur',
+        default: null
     }
 });
 

@@ -19,6 +19,7 @@ const Utilisateur = require('./models/Utilisateur');
 const Partenaire = require('./models/Partenaire');
 const Produit = require('./models/Produit');
 const Favori = require('./models/Favori');
+const ABEvent = require('./models/ABEvent');
 const produitsSeed = require('./data/produits');
 const crypto = require('crypto');
 const { envoyerEmailBienvenue, envoyerEmailRecapCommande, envoyerEmailReinitialisationMotDePasse, envoyerEmailNotificationStatutCommande } = require('./services/email');
@@ -255,7 +256,36 @@ app.post('/api/auth/inscription', authLimiter, async (req, res) => {
             return res.status(400).json({ succes: false, erreur: 'Un compte existe déjà avec cet email.' });
         }
 
-        const utilisateur = new Utilisateur({ nom, telephone, email: emailNormalise, motdepasse });
+        // Génère un code parrainage unique
+        function genererCodeParrainage() {
+            return 'HYG-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+        }
+        let codeParrainage = genererCodeParrainage();
+        let codeExiste = await Utilisateur.findOne({ codeParrainage });
+        while (codeExiste) {
+            codeParrainage = genererCodeParrainage();
+            codeExiste = await Utilisateur.findOne({ codeParrainage });
+        }
+
+        // Traite le code parrain (si fourni)
+        let parrainId = null;
+        let pointsBonus = 0;
+        if (req.body.codeParrainage) {
+            const codeRef = String(req.body.codeParrainage).trim().toUpperCase();
+            const parrain = await Utilisateur.findOne({ codeParrainage: codeRef });
+            if (parrain) {
+                parrainId = parrain._id;
+                pointsBonus = 100;
+                await Utilisateur.findByIdAndUpdate(parrain._id, { $inc: { pointsFidelite: 100 } });
+            }
+        }
+
+        const utilisateur = new Utilisateur({
+            nom, telephone, email: emailNormalise, motdepasse,
+            codeParrainage,
+            parrain: parrainId,
+            pointsFidelite: pointsBonus
+        });
         await utilisateur.save();
 
         // Envoyer l'email de bienvenue en arrière-plan (ne bloque pas la réponse)
@@ -269,7 +299,13 @@ app.post('/api/auth/inscription', authLimiter, async (req, res) => {
             succes: true,
             message: 'Compte créé avec succès.',
             token,
-            utilisateur: { nom: utilisateur.nom, email: utilisateur.email, telephone: utilisateur.telephone }
+            utilisateur: {
+                nom: utilisateur.nom,
+                email: utilisateur.email,
+                telephone: utilisateur.telephone,
+                pointsFidelite: utilisateur.pointsFidelite,
+                codeParrainage: utilisateur.codeParrainage
+            }
         });
     } catch (error) {
         console.error('Erreur POST /api/auth/inscription :', error);
@@ -663,6 +699,18 @@ app.post('/api/commandes', async (req, res) => {
 
         await commande.save();
 
+        // Attribution des points de fidélité si le client a un compte
+        try {
+            if (commande.client.email) {
+                await Utilisateur.findOneAndUpdate(
+                    { email: commande.client.email.toLowerCase().trim() },
+                    { $inc: { pointsFidelite: Math.max(0, Math.floor(commande.total / 1000)) } }
+                );
+            }
+        } catch (err) {
+            console.error('Erreur attribution points fidélité :', err);
+        }
+
         envoyerEmailRecapCommande(commande).catch(err => {
             console.error('Erreur email confirmation commande :', err);
         });
@@ -690,6 +738,51 @@ app.get('/api/mes-commandes', verifierUtilisateur, async (req, res) => {
         return res.json({ succes: true, commandes });
     } catch (error) {
         console.error('Erreur GET /api/mes-commandes :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Fidélité / parrainage (JWT requis)
+app.get('/api/fidelite/points', verifierUtilisateur, async (req, res) => {
+    try {
+        const parrains = await Utilisateur.countDocuments({ parrain: req.user._id });
+        return res.json({
+            succes: true,
+            pointsFidelite: req.user.pointsFidelite,
+            codeParrainage: req.user.codeParrainage,
+            parrains
+        });
+    } catch (error) {
+        console.error('Erreur GET /api/fidelite/points :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
+    }
+});
+
+// Ajouter un parrainage a posteriori
+app.post('/api/fidelite/parrainage', verifierUtilisateur, async (req, res) => {
+    try {
+        const codeRef = String(req.body.codeParrainage || '').trim().toUpperCase();
+        if (!codeRef) {
+            return res.status(400).json({ succes: false, erreur: 'Code parrainage obligatoire.' });
+        }
+        if (req.user.parrain) {
+            return res.status(409).json({ succes: false, erreur: 'Vous avez déjà un parrain.' });
+        }
+        if (codeRef === req.user.codeParrainage) {
+            return res.status(400).json({ succes: false, erreur: 'Vous ne pouvez pas vous parrainer vous-même.' });
+        }
+
+        const parrain = await Utilisateur.findOne({ codeParrainage: codeRef });
+        if (!parrain) {
+            return res.status(404).json({ succes: false, erreur: 'Code parrainage invalide.' });
+        }
+
+        await Utilisateur.findByIdAndUpdate(req.user._id, { parrain: parrain._id, $inc: { pointsFidelite: 100 } });
+        await Utilisateur.findByIdAndUpdate(parrain._id, { $inc: { pointsFidelite: 100 } });
+
+        return res.json({ succes: true, message: 'Parrainage enregistré. +100 points pour vous et votre parrain.' });
+    } catch (error) {
+        console.error('Erreur POST /api/fidelite/parrainage :', error);
         return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
     }
 });
@@ -1294,6 +1387,33 @@ app.get('/api/admin/stats', verifierAdmin, async (req, res) => {
     } catch (error) {
         console.error(error);
         return res.status(500).json({ erreur: 'Erreur serveur.' });
+    }
+});
+
+// A/B testing — enregistrement d'événements (impression / click)
+app.post('/api/ab/event', async (req, res) => {
+    try {
+        const experiment = String(req.body.experiment || '').trim();
+        const variant = String(req.body.variant || '').trim();
+        const type = String(req.body.type || '').trim();
+
+        if (!experiment || !variant || !['impression', 'click'].includes(type)) {
+            return res.status(400).json({ succes: false, erreur: 'Données invalides.' });
+        }
+
+        const event = new ABEvent({
+            experiment,
+            variant,
+            type,
+            userAgent: String(req.headers['user-agent'] || ''),
+            ip: String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
+        });
+
+        await event.save();
+        return res.json({ succes: true });
+    } catch (error) {
+        console.error('Erreur POST /api/ab/event :', error);
+        return res.status(500).json({ succes: false, erreur: 'Erreur serveur.' });
     }
 });
 
