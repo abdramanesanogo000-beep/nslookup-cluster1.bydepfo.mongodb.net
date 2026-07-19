@@ -25,7 +25,7 @@ const crypto = require('crypto');
 const { envoyerEmailBienvenue, envoyerEmailRecapCommande, envoyerEmailReinitialisationMotDePasse, envoyerEmailNotificationStatutCommande } = require('./services/email');
 
 const { signUserToken, verifierUtilisateur } = require('./middleware/auth');
-const { signAdminToken, verifierAdmin, verifierMotDePasseAdmin } = require('./middleware/adminAuth');
+const { signAdminToken, verifierAdmin, verifierMotDePasseAdmin, configAdminValide } = require('./middleware/adminAuth');
 const { globalLimiter, authLimiter } = require('./middleware/rateLimit');
 
 const app = express();
