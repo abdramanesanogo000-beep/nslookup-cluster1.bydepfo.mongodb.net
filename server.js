@@ -71,17 +71,9 @@ if (!process.env.ADMIN_PASSWORD_HASH) {
     console.warn('⚠️ ADMIN_PASSWORD_HASH manquant. La connexion admin sera refusée.');
 }
 
-// CORS restreint aux origines autorisées
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5500,http://localhost:5501,http://127.0.0.1:5500,https://abdramanesanogo000-beep.github.io,null').split(',').map(o => o.trim());
+// CORS autorisé pour toutes les origines (tous les domaines GitHub Pages possibles)
 app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            console.warn('CORS rejeté :', origin);
-            callback(new Error('CORS non autorisé'));
-        }
-    },
+    origin: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
