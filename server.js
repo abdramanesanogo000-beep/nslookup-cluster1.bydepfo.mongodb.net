@@ -29,6 +29,7 @@ const { signAdminToken, verifierAdmin, verifierMotDePasseAdmin } = require('./mi
 const { globalLimiter, authLimiter } = require('./middleware/rateLimit');
 
 const app = express();
+app.set('trust proxy', 1); // Nécessaire derrière le proxy Render pour express-rate-limit
 
 // Nettoyage global des entrées : protection NoSQL + XSS basique
 function sanitizeInput(req, res, next) {
