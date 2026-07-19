@@ -2,7 +2,12 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+
+// Support de ADMIN_PASSWORD (en clair, hashé au démarrage) ou ADMIN_PASSWORD_HASH déjà généré
+let ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+if (process.env.ADMIN_PASSWORD) {
+    ADMIN_PASSWORD_HASH = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12);
+}
 
 function signAdminToken() {
     if (!JWT_SECRET) throw new Error('JWT_SECRET non configuré.');

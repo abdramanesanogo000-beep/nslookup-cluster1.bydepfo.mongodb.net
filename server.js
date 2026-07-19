@@ -68,8 +68,8 @@ if (!process.env.MONGODB_URI) {
     console.error('❌ MONGODB_URI manquant dans .env');
     process.exit(1);
 }
-if (!process.env.ADMIN_PASSWORD_HASH) {
-    console.warn('⚠️ ADMIN_PASSWORD_HASH manquant. La connexion admin sera refusée.');
+if (!configAdminValide()) {
+    console.warn('⚠️ ADMIN_PASSWORD ou ADMIN_PASSWORD_HASH manquant. La connexion admin sera refusée.');
 }
 
 // CORS autorisé pour toutes les origines (tous les domaines GitHub Pages possibles)
@@ -212,7 +212,7 @@ app.post('/api/admin/connexion', authLimiter, async (req, res) => {
         if (!motdepasse) {
             return res.status(400).json({ succes: false, erreur: 'Mot de passe obligatoire.' });
         }
-        if (!process.env.ADMIN_PASSWORD_HASH) {
+        if (!configAdminValide()) {
             return res.status(500).json({ succes: false, erreur: 'Configuration admin incomplète.' });
         }
         const valide = await verifierMotDePasseAdmin(motdepasse);
