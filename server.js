@@ -1095,9 +1095,10 @@ app.delete('/api/admin/produits/:id', verifierAdmin, async (req, res) => {
 });
 
 // ===========================================
-// PAIEMENT PAYTECH
+// PAIEMENT PAYTECH (COMMENTÉ - UTILISATION PAWAPAY)
 // ===========================================
 
+/*
 const PAYTECH_API_URL = 'https://paytech.sn/api/payment/request-payment';
 const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY;
 const PAYTECH_SECRET_KEY = process.env.PAYTECH_SECRET_KEY;
@@ -1222,12 +1223,12 @@ app.post('/api/paiement/notification', async (req, res) => {
         return res.status(200).json({ status: 'ok' });
     }
 });
+*/
 
 // ===========================================
-// PAIEMENT PAWAPAY (COMMENTÉ - INTÉGRATION SUSPENDUE)
+// PAIEMENT PAWAPAY
 // ===========================================
 
-/*
 const PAWAPAY_API_URL = process.env.PAWAPAY_ENV === 'production'
     ? 'https://api.pawapay.io'
     : 'https://api.sandbox.pawapay.io';
@@ -1368,7 +1369,6 @@ app.post('/api/paiement/pawapay-callback', async (req, res) => {
         return res.status(200).json({ status: 'ok' });
     }
 });
-*/
 
 // Vérifier le statut d'un paiement (appelé depuis commande-confirmee.html)
 app.get('/api/paiement/statut', async (req, res) => {
