@@ -1095,10 +1095,9 @@ app.delete('/api/admin/produits/:id', verifierAdmin, async (req, res) => {
 });
 
 // ===========================================
-// PAIEMENT PAYTECH (COMMENTÉ - UTILISATION PAWAPAY)
+// PAIEMENT PAYTECH
 // ===========================================
 
-/*
 const PAYTECH_API_URL = 'https://paytech.sn/api/payment/request-payment';
 const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY;
 const PAYTECH_SECRET_KEY = process.env.PAYTECH_SECRET_KEY;
@@ -1220,152 +1219,6 @@ app.post('/api/paiement/notification', async (req, res) => {
         return res.status(200).json({ status: 'ok' });
     } catch (error) {
         console.error('Erreur POST /api/paiement/notification :', error);
-        return res.status(200).json({ status: 'ok' });
-    }
-});
-*/
-
-// ===========================================
-// PAIEMENT PAWAPAY
-// ===========================================
-
-const PAWAPAY_API_URL = process.env.PAWAPAY_ENV === 'production'
-    ? 'https://api.pawapay.io'
-    : 'https://api.sandbox.pawapay.io';
-const PAWAPAY_API_TOKEN = process.env.PAWAPAY_API_TOKEN;
-
-// Initier un paiement PawaPay (Deposit)
-app.post('/api/paiement/initier', async (req, res) => {
-    try {
-        const { commande_id, montant, client, methode } = req.body;
-
-        if (!commande_id || !montant || !client) {
-            return res.status(400).json({ succes: false, erreur: 'Données de paiement incomplètes.' });
-        }
-
-        if (!PAWAPAY_API_TOKEN) {
-            return res.status(500).json({ succes: false, erreur: 'Clé PawaPay non configurée.' });
-        }
-
-        // Générer un UUIDv4 pour le depositId
-        const { v4: uuidv4 } = require('crypto');
-        const depositId = uuidv4();
-
-        // Mapper la méthode de paiement au provider PawaPay
-        let provider = null;
-        if (methode === 'orange') {
-            provider = 'ORANGE_MLI'; // À vérifier le code exact pour Mali
-        } else if (methode === 'wave') {
-            provider = 'WAVE_MLI'; // À vérifier si Wave est disponible au Mali
-        } else {
-            return res.status(400).json({ succes: false, erreur: 'Méthode de paiement non supportée.' });
-        }
-
-        const payload = {
-            depositId: depositId,
-            amount: Math.round(montant).toString(),
-            currency: 'XOF',
-            payer: {
-                type: 'MMO',
-                accountDetails: {
-                    phoneNumber: client.telephone.replace(/\+/g, ''), // Format: sans le +
-                    provider: provider
-                }
-            },
-            // Optionnel : ajouter des métadonnées pour le suivi
-            metadata: [
-                { commandeId: commande_id },
-                { clientNom: client.nom },
-                { clientEmail: client.email }
-            ]
-        };
-
-        console.log('PawaPay Deposit Request:', payload);
-
-        const response = await fetch(`${PAWAPAY_API_URL}/v2/deposits`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${PAWAPAY_API_TOKEN}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
-
-        const data = await response.json();
-        console.log('PawaPay Deposit Response:', data);
-
-        if (data.status === 'ACCEPTED') {
-            // Mettre à jour la commande avec le depositId
-            await Commande.findOneAndUpdate(
-                { numero: commande_id },
-                {
-                    $set: {
-                        pawapay_deposit_id: depositId,
-                        statut: 'En attente paiement',
-                        paiement_confirme: false
-                    }
-                }
-            );
-
-            return res.json({
-                succes: true,
-                depositId: depositId,
-                status: data.status,
-                message: 'Paiement initié avec succès. Veuillez autoriser le paiement sur votre téléphone.'
-            });
-        }
-
-        console.error('Erreur PawaPay /v2/deposits :', data);
-        return res.status(400).json({ succes: false, erreur: 'Erreur initialisation paiement', details: data });
-    } catch (error) {
-        console.error('Erreur POST /api/paiement/initier (PawaPay) :', error);
-        return res.status(500).json({ succes: false, erreur: 'Erreur serveur' });
-    }
-});
-
-// Webhook PawaPay — notification automatique après paiement
-app.post('/api/paiement/pawapay-callback', async (req, res) => {
-    try {
-        const { depositId, status, amount, currency, payer, metadata } = req.body;
-
-        console.log('PawaPay Callback reçu:', req.body);
-
-        if (!depositId) {
-            return res.status(200).json({ status: 'ok' });
-        }
-
-        // Trouver la commande par depositId
-        const commande = await Commande.findOne({ pawapay_deposit_id: depositId });
-
-        if (!commande) {
-            console.log('⚠️ Callback PawaPay : commande introuvable pour depositId ' + depositId);
-            return res.status(200).json({ status: 'ok' });
-        }
-
-        if (status === 'COMPLETED') {
-            const commandeConfirmee = await Commande.findOneAndUpdate(
-                { pawapay_deposit_id: depositId },
-                { $set: { statut: 'Confirmée', paiement_confirme: true } },
-                { new: true }
-            );
-            console.log('✅ Paiement PawaPay confirmé : ' + commande.numero);
-
-            if (commandeConfirmee) {
-                envoyerEmailRecapCommande(commandeConfirmee).catch(err => {
-                    console.error('Erreur email récap commande :', err);
-                });
-            }
-        } else if (status === 'FAILED' || status === 'CANCELLED') {
-            await Commande.findOneAndUpdate(
-                { pawapay_deposit_id: depositId },
-                { $set: { statut: 'Paiement échoué', paiement_confirme: false } }
-            );
-            console.log('❌ Paiement PawaPay échoué : ' + commande.numero);
-        }
-
-        return res.status(200).json({ status: 'ok' });
-    } catch (error) {
-        console.error('Erreur POST /api/paiement/pawapay-callback :', error);
         return res.status(200).json({ status: 'ok' });
     }
 });
