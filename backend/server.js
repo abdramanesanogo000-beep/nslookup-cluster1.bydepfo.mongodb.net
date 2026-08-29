@@ -1095,146 +1095,13 @@ app.delete('/api/admin/produits/:id', verifierAdmin, async (req, res) => {
 });
 
 // ===========================================
-// PAIEMENT PAYTECH (COMMENTÉ - INTÉGRATION PAWAPAY EN COURS)
+// PAIEMENT MONEROO
 // ===========================================
 
-/*
-const PAYTECH_API_URL = 'https://paytech.sn/api/payment/request-payment';
-const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY;
-const PAYTECH_SECRET_KEY = process.env.PAYTECH_SECRET_KEY;
-const PAYTECH_ENV = process.env.PAYTECH_ENV || 'test';
+const MONEROO_API_URL = 'https://api.moneroo.io/v1/payments/initialize';
+const MONEROO_SECRET_KEY = process.env.MONEROO_SECRET_KEY;
 
-// Initier un paiement PayTech (Orange Money, Wave, Carte bancaire)
-app.post('/api/paiement/initier', async (req, res) => {
-    try {
-        const { commande_id, montant, client, methode } = req.body;
-
-        if (!commande_id || !montant || !client || !methode) {
-            return res.status(400).json({ succes: false, erreur: 'Données de paiement incomplètes.' });
-        }
-
-        if (!PAYTECH_API_KEY || !PAYTECH_SECRET_KEY) {
-            return res.status(500).json({ succes: false, erreur: 'Clés PayTech non configurées.' });
-        }
-
-        const payload = {
-            item_name: `Commande Hygia ${commande_id}`,
-            item_price: Math.round(montant),
-            currency: 'XOF',
-            ref_command: commande_id,
-            command_name: `Matériel médical Hygia — ${commande_id}`,
-            env: PAYTECH_ENV,
-            ipn_url: `${process.env.BACKEND_URL}/api/paiement/notification`,
-            success_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?ref=${commande_id}`,
-            cancel_url: `${process.env.FRONTEND_URL}/panier.html?annule=1`,
-            custom_field: JSON.stringify({
-                client_nom: client.nom,
-                client_tel: client.telephone,
-                client_email: client.email,
-                methode
-            })
-        };
-
-        const response = await fetch(PAYTECH_API_URL, {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'API_KEY': PAYTECH_API_KEY,
-                'API_SECRET': PAYTECH_SECRET_KEY
-            },
-            body: JSON.stringify(payload)
-        });
-
-        const data = await response.json();
-
-        if (data.success === 1 && data.redirect_url) {
-            await Commande.findOneAndUpdate(
-                { numero: commande_id },
-                {
-                    $set: {
-                        paytech_token: data.token || '',
-                        statut: 'En attente paiement',
-                        paiement_confirme: false
-                    }
-                }
-            );
-
-            return res.json({
-                succes: true,
-                redirect_url: data.redirect_url,
-                token: data.token
-            });
-        }
-
-        console.error('Erreur PayTech /payment/request-payment :', data);
-        return res.status(400).json({ succes: false, erreur: 'Erreur initialisation paiement' });
-    } catch (error) {
-        console.error('Erreur POST /api/paiement/initier :', error);
-        return res.status(500).json({ erreur: 'Erreur serveur' });
-    }
-});
-
-// Webhook PayTech — notification automatique après paiement
-app.post('/api/paiement/notification', async (req, res) => {
-    try {
-        const { type_event, ref_command, token } = req.body;
-
-        if (!ref_command) {
-            return res.status(200).json({ status: 'ok' });
-        }
-
-        const commande = await Commande.findOne({ numero: ref_command });
-
-        if (!commande) {
-            console.log('⚠️ IPN PayTech : commande introuvable pour ' + ref_command);
-            return res.status(200).json({ status: 'ok' });
-        }
-
-        if (commande.paytech_token && token && commande.paytech_token !== token) {
-            console.log('⚠️ IPN PayTech : token invalide pour ' + ref_command);
-            return res.status(200).json({ status: 'ok' });
-        }
-
-        if (type_event === 'sale_complete') {
-            const commandeConfirmee = await Commande.findOneAndUpdate(
-                { numero: ref_command },
-                { $set: { statut: 'Confirmée', paiement_confirme: true } },
-                { new: true }
-            );
-            console.log('✅ Paiement PayTech confirmé : ' + ref_command);
-
-            if (commandeConfirmee) {
-                envoyerEmailRecapCommande(commandeConfirmee).catch(err => {
-                    console.error('Erreur email récap commande :', err);
-                });
-            }
-        } else {
-            await Commande.findOneAndUpdate(
-                { numero: ref_command },
-                { $set: { statut: 'Paiement échoué', paiement_confirme: false } }
-            );
-            console.log('❌ Paiement PayTech échoué : ' + ref_command);
-        }
-
-        return res.status(200).json({ status: 'ok' });
-    } catch (error) {
-        console.error('Erreur POST /api/paiement/notification :', error);
-        return res.status(200).json({ status: 'ok' });
-    }
-});
-*/
-
-// ===========================================
-// PAIEMENT PAWAPAY
-// ===========================================
-
-const PAWAPAY_API_URL = process.env.PAWAPAY_ENV === 'production'
-    ? 'https://api.pawapay.io'
-    : 'https://api.sandbox.pawapay.io';
-const PAWAPAY_API_TOKEN = process.env.PAWAPAY_API_TOKEN;
-
-// Initier un paiement PawaPay (Deposit)
+// Initier un paiement Moneroo (Orange Money, Moov Money, Mobi Cash au Mali)
 app.post('/api/paiement/initier', async (req, res) => {
     try {
         const { commande_id, montant, client, methode } = req.body;
@@ -1243,64 +1110,66 @@ app.post('/api/paiement/initier', async (req, res) => {
             return res.status(400).json({ succes: false, erreur: 'Données de paiement incomplètes.' });
         }
 
-        if (!PAWAPAY_API_TOKEN) {
-            return res.status(500).json({ succes: false, erreur: 'Clé PawaPay non configurée.' });
+        if (!MONEROO_SECRET_KEY) {
+            return res.status(500).json({ succes: false, erreur: 'Clé Moneroo non configurée.' });
         }
 
-        // Générer un UUIDv4 pour le depositId
-        const { v4: uuidv4 } = require('crypto');
-        const depositId = uuidv4();
-
-        // Mapper la méthode de paiement au provider PawaPay
-        let provider = null;
+        // Mapper la méthode de paiement aux codes Moneroo pour le Mali
+        let methods = [];
         if (methode === 'orange') {
-            provider = 'ORANGE_MLI'; // À vérifier le code exact pour Mali
-        } else if (methode === 'wave') {
-            provider = 'WAVE_MLI'; // À vérifier si Wave est disponible au Mali
+            methods = ['orange_ml'];
+        } else if (methode === 'moov') {
+            methods = ['moov_ml'];
+        } else if (methode === 'mobicash') {
+            methods = ['mobi_cash_ml'];
         } else {
-            return res.status(400).json({ succes: false, erreur: 'Méthode de paiement non supportée.' });
+            // Si aucune méthode spécifique, autoriser toutes les méthodes Mali
+            methods = ['orange_ml', 'moov_ml', 'mobi_cash_ml'];
         }
 
         const payload = {
-            depositId: depositId,
-            amount: Math.round(montant).toString(),
+            amount: Math.round(montant),
             currency: 'XOF',
-            payer: {
-                type: 'MMO',
-                accountDetails: {
-                    phoneNumber: client.telephone.replace(/\+/g, ''), // Format: sans le +
-                    provider: provider
-                }
+            description: `Commande Hygia ${commande_id}`,
+            return_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?ref=${commande_id}`,
+            customer: {
+                email: client.email || '',
+                first_name: client.nom || '',
+                last_name: client.prenom || '',
+                phone: client.telephone || ''
             },
-            // Optionnel : ajouter des métadonnées pour le suivi
-            metadata: [
-                { commandeId: commande_id },
-                { clientNom: client.nom },
-                { clientEmail: client.email }
-            ]
+            metadata: {
+                commande_id: commande_id,
+                client_nom: client.nom,
+                client_tel: client.telephone,
+                methode: methode
+            },
+            methods: methods,
+            restrict_country_code: 'ML'
         };
 
-        console.log('PawaPay Deposit Request:', payload);
+        console.log('Moneroo Initialize Request:', payload);
 
-        const response = await fetch(`${PAWAPAY_API_URL}/v2/deposits`, {
+        const response = await fetch(MONEROO_API_URL, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${PAWAPAY_API_TOKEN}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${MONEROO_SECRET_KEY}`,
+                'Accept': 'application/json'
             },
             body: JSON.stringify(payload)
         });
 
         const data = await response.json();
-        console.log('PawaPay Deposit Response:', data);
+        console.log('Moneroo Initialize Response:', data);
 
-        if (data.status === 'ACCEPTED') {
-            // Mettre à jour la commande avec le depositId
+        if (data.success && data.data && data.data.checkout_url) {
+            // Mettre à jour la commande avec l'ID de transaction Moneroo
             await Commande.findOneAndUpdate(
                 { numero: commande_id },
                 {
                     $set: {
-                        pawapay_deposit_id: depositId,
+                        moneroo_transaction_id: data.data.id || '',
                         statut: 'En attente paiement',
                         paiement_confirme: false
                     }
@@ -1309,63 +1178,62 @@ app.post('/api/paiement/initier', async (req, res) => {
 
             return res.json({
                 succes: true,
-                depositId: depositId,
-                status: data.status,
-                message: 'Paiement initié avec succès. Veuillez autoriser le paiement sur votre téléphone.'
+                redirect_url: data.data.checkout_url,
+                transaction_id: data.data.id
             });
         }
 
-        console.error('Erreur PawaPay /v2/deposits :', data);
+        console.error('Erreur Moneroo /v1/payments/initialize :', data);
         return res.status(400).json({ succes: false, erreur: 'Erreur initialisation paiement', details: data });
     } catch (error) {
-        console.error('Erreur POST /api/paiement/initier (PawaPay) :', error);
+        console.error('Erreur POST /api/paiement/initier (Moneroo) :', error);
         return res.status(500).json({ succes: false, erreur: 'Erreur serveur' });
     }
 });
 
-// Webhook PawaPay — notification automatique après paiement
-app.post('/api/paiement/pawapay-callback', async (req, res) => {
+// Webhook Moneroo — notification automatique après paiement
+app.post('/api/paiement/moneroo-webhook', async (req, res) => {
     try {
-        const { depositId, status, amount, currency, payer, metadata } = req.body;
+        const { data } = req.body;
 
-        console.log('PawaPay Callback reçu:', req.body);
+        console.log('Moneroo Webhook reçu:', req.body);
 
-        if (!depositId) {
+        if (!data || !data.id) {
             return res.status(200).json({ status: 'ok' });
         }
 
-        // Trouver la commande par depositId
-        const commande = await Commande.findOne({ pawapay_deposit_id: depositId });
+        // Trouver la commande par transaction_id
+        const commande = await Commande.findOne({ moneroo_transaction_id: data.id });
 
         if (!commande) {
-            console.log('⚠️ Callback PawaPay : commande introuvable pour depositId ' + depositId);
+            console.log('⚠️ Webhook Moneroo : commande introuvable pour transaction_id ' + data.id);
             return res.status(200).json({ status: 'ok' });
         }
 
-        if (status === 'COMPLETED') {
+        if (data.status === 'success') {
             const commandeConfirmee = await Commande.findOneAndUpdate(
-                { pawapay_deposit_id: depositId },
+                { moneroo_transaction_id: data.id },
                 { $set: { statut: 'Confirmée', paiement_confirme: true } },
                 { new: true }
             );
-            console.log('✅ Paiement PawaPay confirmé : ' + commande.numero);
+            console.log('✅ Paiement Moneroo confirmé : ' + commande.numero);
 
             if (commandeConfirmee) {
                 envoyerEmailRecapCommande(commandeConfirmee).catch(err => {
                     console.error('Erreur email récap commande :', err);
                 });
             }
-        } else if (status === 'FAILED' || status === 'CANCELLED') {
+        } else if (data.status === 'failed' || data.status === 'cancelled') {
             await Commande.findOneAndUpdate(
-                { pawapay_deposit_id: depositId },
+                { moneroo_transaction_id: data.id },
                 { $set: { statut: 'Paiement échoué', paiement_confirme: false } }
             );
-            console.log('❌ Paiement PawaPay échoué : ' + commande.numero);
+            console.log('❌ Paiement Moneroo échoué : ' + commande.numero);
         }
 
         return res.status(200).json({ status: 'ok' });
     } catch (error) {
-        console.error('Erreur POST /api/paiement/pawapay-callback :', error);
+        console.error('Erreur POST /api/paiement/moneroo-webhook :', error);
         return res.status(200).json({ status: 'ok' });
     }
 });

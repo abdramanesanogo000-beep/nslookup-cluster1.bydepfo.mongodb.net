@@ -651,7 +651,7 @@
                 <button type="submit">🔍</button>
             </form>
             <a href="connexion.html" class="nav-compte-link">Connexion</a>
-            <a href="panier.html">Panier <span id="cart-count">0</span></a>
+            <a href="panier.html" aria-label="Panier"><span id="cart-count">0</span></a>
         </div>
     </nav>
 
@@ -773,6 +773,15 @@
                                     <p style="margin: 4px 0 0; font-size: 13px; color: #888;">Changez votre mot de passe régulièrement pour plus de sécurité.</p>
                                 </div>
                                 <button id="btn-changer-password" class="btn-modifier-profil">Changer</button>
+                            </div>
+                        </div>
+                        <div class="compte-info-card" style="margin-bottom: 24px;">
+                            <div class="compte-info-row" style="justify-content: space-between;">
+                                <div>
+                                    <span class="info-value">Mot de passe oublié</span>
+                                    <p style="margin: 4px 0 0; font-size: 13px; color: #888;">Réinitialisez votre mot de passe par email si vous l'avez oublié.</p>
+                                </div>
+                                <a href="mot-de-passe-oublie.html" class="btn-modifier-profil" style="text-decoration: none; display: inline-block;">Réinitialiser</a>
                             </div>
                         </div>
                         <div id="form-password-card" class="compte-form-card">

@@ -84,6 +84,14 @@ const commandeSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    xpay_reference: {
+        type: String,
+        default: ''
+    },
+    montant_paye: {
+        type: Number,
+        default: 0
+    },
     paiement_confirme: {
         type: Boolean,
         default: false

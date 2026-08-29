@@ -1,0 +1,198 @@
+/*
+Theme Name: Hygia Checkout
+Theme URI: https://hygia.com
+Description: Thème personnalisé pour le checkout Hygia - Intégration avec le site principal HTML/CSS/JS
+Author: Hygia
+Version: 1.0.0
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: hygia-checkout
+*/
+
+/* ========================================
+   Styles Hygia - Intégration avec le site principal
+   ======================================== */
+
+:root {
+    --hygia-primary: #185FA5;
+    --hygia-secondary: #0D3B66;
+    --hygia-accent: #E74C3C;
+    --hygia-light: #F8F9FA;
+    --hygia-dark: #2C3E50;
+    --hygia-success: #27AE60;
+    --hygia-warning: #F39C12;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: var(--hygia-dark);
+    background-color: #fff;
+    margin: 0;
+    padding: 0;
+}
+
+/* Header Hygia */
+.hygia-header {
+    background: linear-gradient(135deg, var(--hygia-primary), var(--hygia-secondary));
+    color: white;
+    padding: 20px 0;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.hygia-header .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.hygia-logo {
+    font-size: 24px;
+    font-weight: bold;
+    color: white;
+    text-decoration: none;
+}
+
+/* Container principal */
+.woocommerce {
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 20px;
+}
+
+/* Checkout WooCommerce */
+.woocommerce-checkout {
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+}
+
+.woocommerce-checkout .col2-set {
+    width: 100%;
+}
+
+/* Colonnes checkout */
+.woocommerce-checkout .woocommerce-billing-fields,
+.woocommerce-checkout .woocommerce-shipping-fields,
+.woocommerce-checkout .woocommerce-additional-fields {
+    background: var(--hygia-light);
+    padding: 30px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+.woocommerce-checkout .woocommerce-order-review {
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+/* Champs de formulaire */
+.woocommerce form .form-row label {
+    font-weight: 600;
+    color: var(--hygia-dark);
+}
+
+.woocommerce form .form-row input,
+.woocommerce form .form-row select,
+.woocommerce form .form-row textarea {
+    border: 2px solid #ddd;
+    border-radius: 5px;
+    padding: 12px;
+    font-size: 16px;
+}
+
+.woocommerce form .form-row input:focus,
+.woocommerce form .form-row select:focus,
+.woocommerce form .form-row textarea:focus {
+    border-color: var(--hygia-primary);
+    outline: none;
+}
+
+/* Boutons */
+.woocommerce button.button,
+.woocommerce a.button {
+    background: var(--hygia-primary);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 15px 30px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.woocommerce button.button:hover,
+.woocommerce a.button:hover {
+    background: var(--hygia-secondary);
+}
+
+/* Tableau de commande */
+.woocommerce table.shop_table {
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.woocommerce table.shop_table th,
+.woocommerce table.shop_table td {
+    padding: 15px;
+    border-bottom: 1px solid #ddd;
+}
+
+.woocommerce table.shop_table th {
+    background: var(--hygia-light);
+    font-weight: 600;
+}
+
+/* Messages WooCommerce */
+.woocommerce-message,
+.woocommerce-error,
+.woocommerce-info {
+    padding: 15px 20px;
+    border-radius: 5px;
+    margin: 20px 0;
+}
+
+.woocommerce-message {
+    background: #d4edda;
+    border-left: 4px solid var(--hygia-success);
+    color: #155724;
+}
+
+.woocommerce-error {
+    background: #f8d7da;
+    border-left: 4px solid var(--hygia-accent);
+    color: #721c24;
+}
+
+.woocommerce-info {
+    background: #d1ecf1;
+    border-left: 4px solid var(--hygia-primary);
+    color: #0c5460;
+}
+
+/* Footer */
+.hygia-footer {
+    background: var(--hygia-dark);
+    color: white;
+    padding: 30px 0;
+    text-align: center;
+    margin-top: 50px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .woocommerce-checkout {
+        flex-direction: column;
+    }
+    
+    .woocommerce-checkout .col2-set {
+        width: 100%;
+    }
+}

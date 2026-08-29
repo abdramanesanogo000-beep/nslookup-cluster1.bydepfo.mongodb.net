@@ -87,7 +87,7 @@ const i18n = {
     "paiement.orange"    : "Orange Money",
     "paiement.wave"      : "Wave",
     "paiement.carte"     : "Carte bancaire",
-    "paiement.secure"    : "🔒 Paiements sécurisés par PayTech — vos données bancaires ne transitent jamais par nos serveurs.",
+    "paiement.secure"    : "🔒 Paiements sécurisés par XPay — vos données bancaires ne transitent jamais par nos serveurs.",
     "paiement.redirect"  : "Vous allez être redirigé vers la page de paiement sécurisée.",
     "paiement.confirmer" : "Procéder au paiement →",
 
@@ -231,7 +231,7 @@ const i18n = {
     "paiement.orange"    : "Orange Money",
     "paiement.wave"      : "Wave",
     "paiement.carte"     : "Bank card",
-    "paiement.secure"    : "🔒 Secure payments by PayTech — your banking data never passes through our servers.",
+    "paiement.secure"    : "🔒 Secure payments by XPay — your banking data never passes through our servers.",
     "paiement.redirect"  : "You will be redirected to the secure payment page.",
     "paiement.confirmer" : "Proceed to payment →",
 
@@ -1534,7 +1534,7 @@ function getDetailsPaiement(methode, total) {
             ${logo}
             <p style="font-size:14px; color:#555; margin-bottom:12px;">
                 ${t("paiement.redirect")}
-                PayTech — <strong>${total.toLocaleString()} FCFA</strong>
+                XPay — <strong>${total.toLocaleString()} FCFA</strong>
                 ${tr("par", "via")} <strong>${libelles[methode] || methode}</strong>.
             </p>
             <p style="font-size:12px; color:#888;">
@@ -1705,11 +1705,11 @@ async function confirmerCommande(methode) {
         return;
     }
 
-    console.log("DEBUG: Paiement en ligne, appel PayTech");
+    console.log("DEBUG: Paiement en ligne, appel Moneroo");
 
-    // ÉTAPE 2 : Initier le paiement PayTech
+    // ÉTAPE 2 : Initier le paiement Moneroo
     try {
-        console.log("DEBUG: Appel PayTech avec commande_id =", numeroCommande, "montant =", totalCommande);
+        console.log("DEBUG: Appel Moneroo avec commande_id =", numeroCommande, "montant =", totalCommande);
         const res = await fetch(`${BACKEND_URL}/api/paiement/initier`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1726,7 +1726,7 @@ async function confirmerCommande(methode) {
         });
 
         const paymentData = await res.json();
-        console.log("DEBUG: Réponse PayTech =", paymentData);
+        console.log("DEBUG: Réponse Moneroo =", paymentData);
 
         if (paymentData.succes && paymentData.redirect_url) {
             // Sauvegarder dans l'historique local avant redirection
@@ -1734,23 +1734,22 @@ async function confirmerCommande(methode) {
             savePanier([]);
             mettreAJourCompteurPanier();
 
-            // Rediriger vers la page de paiement PayTech
+            // Rediriger vers la page de paiement Moneroo
             window.location.href = paymentData.redirect_url;
             return;
 
         } else {
-            // Si le paiement électronique n'est pas disponible, on redirige quand même vers le reçu
-            // avec une mention d'attente. Le client pourra régler plus tard.
+            // Si le paiement électronique n'est pas disponible
             enregistrerCommande(panier, methode, totalCommande);
             savePanier([]);
             mettreAJourCompteurPanier();
-            afficherToast("Votre commande est enregistrée. Finalisez le paiement depuis votre compte.", "info");
+            afficherToast(paymentData.erreur || "Erreur initialisation paiement", "error");
             window.location.href = `commande-confirmee.html?numero=${numeroCommande}`;
         }
 
     } catch (err) {
         hideSyphaLoader();
-        console.error("Erreur PayTech:", err);
+        console.error("Erreur Moneroo:", err);
         // Même comportement en cas d'erreur réseau
         enregistrerCommande(panier, methode, totalCommande);
         savePanier([]);
