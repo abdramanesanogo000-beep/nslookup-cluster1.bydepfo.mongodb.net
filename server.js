@@ -1134,8 +1134,8 @@ app.post('/api/paiement/initier', async (req, res) => {
             return_url: `${process.env.FRONTEND_URL}/commande-confirmee.html?ref=${commande_id}`,
             customer: {
                 email: client.email || '',
-                first_name: client.nom || '',
-                last_name: client.prenom || '',
+                first_name: client.nom || 'Client',
+                last_name: client.prenom || 'Hygia',
                 phone: client.telephone || ''
             },
             metadata: {
@@ -1144,8 +1144,7 @@ app.post('/api/paiement/initier', async (req, res) => {
                 client_tel: client.telephone,
                 methode: methode
             },
-            methods: methods,
-            restrict_country_code: 'ML'
+            methods: methods
         };
 
         console.log('Moneroo Initialize Request:', payload);
