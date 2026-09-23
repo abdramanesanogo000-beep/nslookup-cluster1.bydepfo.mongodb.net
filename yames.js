@@ -1638,12 +1638,12 @@ async function confirmerCommande(methode) {
     console.log("DEBUG: methode =", methode, "isLivraison =", isLivraison);
 
     // Feedback visuel sur le bouton + loader Sypha
-    const btnConfirmer = document.querySelector(".btn-confirmer");
-    if (btnConfirmer) {
-        btnConfirmer.textContent = isLivraison
+    const btnPaiement = document.getElementById("btn-paiement");
+    if (btnPaiement) {
+        btnPaiement.textContent = isLivraison
             ? "⏳ Validation de votre commande..."
             : "⏳ Redirection vers le paiement...";
-        btnConfirmer.disabled = true;
+        btnPaiement.disabled = true;
     }
     showSyphaLoader(isLivraison ? "Validation de votre commande..." : "Redirection vers le paiement...");
 
@@ -1686,9 +1686,9 @@ async function confirmerCommande(methode) {
         console.warn("Impossible de créer la commande:", err);
         hideSyphaLoader();
         alert("Impossible d'enregistrer la commande. Veuillez réessayer.");
-        if (btnConfirmer) {
-            btnConfirmer.textContent = tr("Confirmer ma commande", "Confirm my order");
-            btnConfirmer.disabled = false;
+        if (btnPaiement) {
+            btnPaiement.textContent = tr("Payer", "Pay");
+            btnPaiement.disabled = false;
         }
         return;
     }
@@ -2898,11 +2898,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // --- Modal de paiement ---
+    // --- Système de paiement Moneroo ---
     const btnPaiement = document.getElementById("btn-paiement");
-    const modal = document.getElementById("modal-paiement");
-    const closeModal = document.getElementById("close-modal");
-    const paymentDetails = document.getElementById("payment-details");
     const zoneLivraison = document.getElementById("livraison-zone");
 
     if (zoneLivraison) {
@@ -2928,47 +2925,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
-            // Étape 2 : valider le formulaire et ouvrir le modal
+            // Étape 2 : valider le formulaire et rediriger directement vers Moneroo
             if (!validerFormulaireLivraison()) {
                 livraisonForm.scrollIntoView({ behavior: "smooth" });
                 return;
             }
 
-            modal.classList.add("active");
+            // Rediriger directement vers Moneroo avec carte bancaire par défaut
+            confirmerCommande("carte");
         });
     }
-
-    if (closeModal) {
-        closeModal.addEventListener("click", () => {
-            modal.classList.remove("active");
-            paymentDetails.classList.remove("active");
-            paymentDetails.innerHTML = "";
-            document.querySelectorAll(".payment-option").forEach(btn => btn.classList.remove("selected"));
-        });
-    }
-
-    document.querySelectorAll(".payment-option").forEach(btn => {
-        btn.addEventListener("click", () => {
-            document.querySelectorAll(".payment-option").forEach(b => b.classList.remove("selected"));
-            btn.classList.add("selected");
-
-            const methode = btn.dataset.method;
-            if (!["orange", "wave", "carte", "livraison"].includes(methode)) return;
-
-            const total = getTotalPanier();
-
-            paymentDetails.innerHTML = getDetailsPaiement(methode, total);
-            paymentDetails.classList.add("active");
-
-            const btnConfirmer = paymentDetails.querySelector(".btn-confirmer");
-            if (btnConfirmer) {
-                btnConfirmer.addEventListener("click", () => {
-                    console.log("DEBUG: Bouton confirmer cliqué avec methode =", methode);
-                    confirmerCommande(methode);
-                });
-            }
-        });
-    });
 
     const couponInput = document.getElementById("coupon-input");
     const couponButton = document.getElementById("coupon-button");

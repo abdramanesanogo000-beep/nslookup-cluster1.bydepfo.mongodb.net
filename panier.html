@@ -150,49 +150,10 @@
                 <button id="btn-paiement" class="btn-paiement">Passer au paiement</button>
             </div>
 
-            <!-- MODAL DE PAIEMENT -->
-            <div id="modal-paiement" class="modal-overlay">
-                <div class="modal-box">
-                    <button id="close-modal" class="modal-close">✕</button>
-                    <h2>Choisissez votre mode de paiement</h2>
-
-                    <div class="payment-options">
-                        <button class="payment-option" data-method="orange">
-                            <img src="img/logo Orange.png" alt="Orange Money" class="payment-icon-img">
-                            <div class="payment-option-content">
-                                <span class="payment-name">Orange Money</span>
-                                
-                            </div>
-                        </button>
-                        <button class="payment-option" data-method="wave">
-                            <img src="img/logo wave.png" alt="Wave" class="payment-icon-img">
-                            <div class="payment-option-content">
-                                <span class="payment-name">Wave</span>
-                               
-                            </div>
-                        </button>
-                        <button class="payment-option" data-method="carte">
-                            <img src="img/logo visa-mastercard.png" alt="Visa / Mastercard" class="payment-icon-img">
-                            <div class="payment-option-content">
-                                <span class="payment-name">Visa / Mastercard</span>
-                              
-                            </div>
-                        </button>
-                        <button class="payment-option" data-method="livraison">
-                            <div class="payment-icon-img" style="display:flex;align-items:center;justify-content:center;font-size:28px;background:#E6F1FB;">🚚</div>
-                            <div class="payment-option-content">
-                                <span class="payment-name">Payer à la livraison</span>
-                            </div>
-                        </button>
-                    </div>
-
-                    <p class="payment-secure-note">
-                        🔒 Paiements sécurisés par PayTech — vos données bancaires
-                        ne transitent jamais par nos serveurs.
-                    </p>
-
-                    <div id="payment-details" class="payment-details"></div>
-                </div>
+            <!-- INDICATION DE PAIEMENT -->
+            <div id="payment-info" class="payment-info" style="display:none;">
+                <p>🔒 Paiements sécurisés par Moneroo/PayDunya — vos données bancaires ne transitent jamais par nos serveurs.</p>
+                <p>Vous allez être redirigé vers la page de paiement sécurisée après validation de votre commande.</p>
             </div>
 
         </section>

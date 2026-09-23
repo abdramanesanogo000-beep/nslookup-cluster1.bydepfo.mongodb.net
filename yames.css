@@ -1816,8 +1816,23 @@ footer p {
     background-color: #0C447C;
 }
 
-/* ===== MODAL PAIEMENT ===== */
-.modal-overlay {
+/* ===== INFORMATION PAIEMENT ===== */
+.payment-info {
+    background-color: #E6F1FB;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 20px 0;
+    border-left: 4px solid #185FA5;
+}
+
+.payment-info p {
+    margin: 8px 0;
+    color: #2C2C2A;
+    font-size: 14px;
+}
+
+/* ===== MODAL PAIEMENT (DÉSACTIVÉ - UTILISATION MONEROO DIRECTE) ===== */
+/* .modal-overlay {
     display: none;
     position: fixed;
     top: 0;

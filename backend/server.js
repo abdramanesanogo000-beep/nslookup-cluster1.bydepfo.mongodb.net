@@ -1118,13 +1118,20 @@ app.post('/api/paiement/initier', async (req, res) => {
         let methods = [];
         if (methode === 'orange') {
             methods = ['orange_ml'];
+        } else if (methode === 'wave') {
+            // Wave utilise Orange Money via Moneroo
+            methods = ['orange_ml'];
+        } else if (methode === 'carte') {
+            // Carte bancaire via PayDunya
+            methods = ['card'];
         } else if (methode === 'moov') {
             methods = ['moov_ml'];
         } else if (methode === 'mobicash') {
-            methods = ['mobi_cash_ml'];
+            // Mobicash n'est pas directement supporté par Moneroo, utiliser Orange Money par défaut
+            methods = ['orange_ml'];
         } else {
-            // Si aucune méthode spécifique, autoriser toutes les méthodes Mali
-            methods = ['orange_ml', 'moov_ml', 'mobi_cash_ml'];
+            // Si aucune méthode spécifique, autoriser les méthodes Mali valides
+            methods = ['orange_ml', 'moov_ml', 'card'];
         }
 
         const payload = {
